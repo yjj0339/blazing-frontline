@@ -22,12 +22,17 @@ export class Game {
     this.score = { blue: 0, red: 0 };
 
     const canvas = document.getElementById('c');
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.12;
+    // 帧率自适应：初始最高档，掉帧自动降 pixelRatio
+    this._prTiers = [Math.min(devicePixelRatio, 1.75), Math.min(devicePixelRatio, 1.35), 1.0];
+    this._prTier = 0;
+    this._fpsEMA = 60;
+    this._fpsT = 0;
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.08, 400);
     this.camera.rotation.order = 'YXZ';
     this.scene = new THREE.Scene();
@@ -111,8 +116,8 @@ export class Game {
 
   _resize() {
     const w = innerWidth, h = innerHeight;
+    this.renderer.setPixelRatio(this._prTiers ? this._prTiers[this._prTier] : Math.min(devicePixelRatio, 2));
     this.renderer.setSize(w, h);
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.ui?.isTouch() ? 1.5 : 2));
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -409,6 +414,7 @@ export class Game {
     }
 
     if (victim.isPlayer) {
+      victim.lastKiller = killer && killer !== victim ? killer : null;
       victim.respawnT = 2.5;
     } else {
       victim.respawnT = 2.5;
@@ -486,7 +492,7 @@ export class Game {
       moveX: 0, moveY: 0, jump: false, crouch: false, sprint: false,
       firing: false, ads: false, reload: false, grenade: false,
       switchTo: null, cycle: 0, lookDX: 0, lookDY: 0,
-      useUav: false, useStrike: false,
+      useUav: false, useStrike: false, toggleFire: false,
     };
     const keys = {};
     const syncMove = () => {
@@ -508,6 +514,7 @@ export class Game {
       if (e.code === 'Digit4') inp.switchTo = 'pg';
       if (e.code === 'Digit5') inp.useUav = true;
       if (e.code === 'Digit6') inp.useStrike = true;
+      if (e.code === 'KeyX') inp.toggleFire = true;
       if (e.code === 'KeyQ') inp.cycle = -1;
       if (e.code === 'Escape' && this.state === 'playing') this.togglePause(true);
       syncMove();
@@ -574,8 +581,20 @@ export class Game {
   // ============ 主循环 ============
   _tick(now) {
     requestAnimationFrame(this._tick);
-    let dt = Math.min(0.05, (now - this._last) / 1000);
+    const rawDt = Math.min(0.05, (now - this._last) / 1000);
     this._last = now;
+    let dt = rawDt;
+
+    // 帧率监控：持续掉帧自动降渲染分辨率档位
+    this._fpsEMA += (1 / Math.max(rawDt, 1e-4) - this._fpsEMA) * 0.03;
+    this._fpsT += rawDt;
+    if (this._fpsT > 2.5) {
+      this._fpsT = 0;
+      if (this._fpsEMA < 45 && this._prTier < this._prTiers.length - 1) {
+        this._prTier++;
+        this._resize();
+      }
+    }
 
     if (this._autoTest) {
       this._autoTest.t -= dt;
@@ -598,9 +617,14 @@ export class Game {
         dt *= 0.22;
       }
       this._consumeLook();
-      // 连杀奖励按键
+      // 连杀奖励按键 + 射击模式/倍镜档位（X）
       if (this.input.useUav) { this.input.useUav = false; this.useUav(); }
       if (this.input.useStrike) { this.input.useStrike = false; this.useStrike(); }
+      if (this.input.toggleFire) {
+        this.input.toggleFire = false;
+        if (this.inv.current === 'sr') { this.zoom2 = !this.zoom2; this.ui.streakBanner(this.zoom2 ? '倍镜 ×7.5' : '倍镜 ×3.8'); }
+        else this.inv.switchFireMode();
+      }
       this.player.update(dt, this.input);
       this.weapons.update(dt, this.input);
       this.input.jump = false;
@@ -633,9 +657,11 @@ export class Game {
       }
     }
 
-    // FOV：ADS
+    // FOV：ADS 倍镜（狙击二段 ×7.5）
     const w = this.inv.w;
-    const targetFov = this.baseFov + (w.adsFov - this.baseFov) * this.player.adsT;
+    let adsFov = w.adsFov;
+    if (w.zoom2Fov && this.zoom2) adsFov = w.zoom2Fov;
+    const targetFov = this.baseFov + (adsFov - this.baseFov) * this.player.adsT;
     if (Math.abs(this.camera.fov - targetFov) > 0.1) {
       this.camera.fov += (targetFov - this.camera.fov) * 0.25;
       this.camera.updateProjectionMatrix();

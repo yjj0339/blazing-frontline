@@ -144,7 +144,11 @@ export class UI {
     const w = g.inv.w, st = g.inv.st;
     $('ammo-mag').textContent = st.mag;
     $('ammo-res').textContent = '/ ' + st.reserve;
-    $('wname').textContent = w.name;
+    const modeTxt = w.modes ? ' · ' + w.modes[g.inv.fireMode] : ' · ' + w.opticName;
+    $('wname').textContent = w.name + modeTxt;
+    const magEl = $('ammo-mag');
+    magEl.classList.toggle('warn', st.mag > 0 && st.mag <= Math.ceil(w.mag * 0.3));
+    magEl.classList.toggle('empty', st.mag === 0);
     $('grenade-n').textContent = '×' + g.inv.grenades;
     const slots = $('weapon-slots');
     [...slots.children].forEach((el, i) => {
@@ -177,10 +181,18 @@ export class UI {
       this.hitT -= dt;
       if (this.hitT <= 0) $('hitmarker').classList.remove('show', 'head');
     }
-    // 狙击镜
+    // 狙击镜 / 全息镜
     const scope = w.scope && p.adsT > 0.85;
     $('scope-overlay').classList.toggle('hidden', !scope);
+    $('scope-overlay').classList.toggle('x2', !!(w.zoom2Fov && this.game.zoom2));
+    $('holo-overlay').classList.toggle('show', w.optic === 'holo' && p.adsT > 0.55);
     $('crosshair').classList.toggle('hidden', scope);
+    // 换弹进度
+    const rb = $('reload-bar');
+    if (g.inv.reloadT > 0) {
+      rb.classList.add('show');
+      rb.firstElementChild.style.width = ((1 - g.inv.reloadT / w.reload) * 100) + '%';
+    } else rb.classList.remove('show');
     // 受击红晕衰减
     const v = $('dmg-vignette');
     if (this._vign > 0) {
@@ -204,7 +216,8 @@ export class UI {
     const rp = $('respawn-tip');
     if (!p.alive) {
       rp.classList.remove('hidden');
-      rp.textContent = p.respawnT > 0 ? `重生倒计时 ${Math.ceil(p.respawnT)} …` : '即将重生…';
+      const kTxt = p.lastKiller ? `被 ${p.lastKiller.name} 击杀 · ` : '';
+      rp.textContent = p.respawnT > 0 ? `${kTxt}重生倒计时 ${Math.ceil(p.respawnT)} …` : '即将重生…';
     } else rp.classList.add('hidden');
   }
 
@@ -213,6 +226,10 @@ export class UI {
     const h = $('hitmarker');
     h.classList.add('show');
     h.classList.toggle('head', !!head);
+    const ch = $('crosshair');
+    ch.classList.add('hitflash');
+    clearTimeout(this._chT);
+    this._chT = setTimeout(() => ch.classList.remove('hitflash'), 110);
   }
   vignette(k = 0.55) { this._vign = Math.max(this._vign || 0, k); }
 

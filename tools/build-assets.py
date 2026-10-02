@@ -142,83 +142,103 @@ def export(root, fname):
     print('exported', fname, os.path.getsize(path), 'bytes')
 
 # ============================================================
-# 士兵（面朝 -Y）
+# 士兵 v2（面朝 -Y）：两段四肢（肘/膝独立枢轴）、圆盔、全套装具
 # ============================================================
 def build_soldier():
     clear()
     root = empty('Soldier')
 
-    # ---- 腿（pivot 髋部 z=0.84）----
-    legs = {}
+    # ---- 腿：大腿(leg) + 小腿(shin，挂在大腿下) ----
     for side, sx in (('L', -1), ('R', 1)):
-        x = 0.115 * sx
-        thigh = box(f'thigh_{side}', M['dark'], (0.15, 0.17, 0.40), (x, 0, 0.62))
-        shin  = box(f'shin_{side}',  M['dark'], (0.13, 0.15, 0.30), (x, -0.005, 0.27))
-        knee  = box(f'knee_{side}',  M['strap'], (0.145, 0.16, 0.09), (x, -0.02, 0.435))
-        boot  = box(f'boot_{side}',  M['boots'], (0.15, 0.25, 0.11), (x, -0.05, 0.055))
-        boot2 = box(f'boot2_{side}', M['boots'], (0.155, 0.14, 0.05), (x, -0.05, 0.13))
-        legs[side] = join([thigh, shin, knee, boot, boot2], f'leg_{side}', (x, 0, 0.84))
-        parent_to(legs[side], root)
+        x = 0.105 * sx
+        # 大腿组：大腿+护膝，pivot 髋 0.92
+        thigh = box(f'thigh_{side}', M['dark'], (0.155, 0.18, 0.42), (x, 0, 0.71))
+        tpanl = box(f'tpanl_{side}', M['strap'], (0.16, 0.17, 0.10), (x, -0.01, 0.62))
+        knee  = box(f'knee_{side}',  M['strap'], (0.15, 0.165, 0.09), (x, -0.025, 0.505), bevel=0.03, seg=3)
+        leg = join([thigh, tpanl, knee], f'leg_{side}', (x, 0, 0.92))
+        # 小腿组：小腿+靴，pivot 膝 0.49
+        shin  = box(f'shinbox_{side}', M['dark'], (0.13, 0.145, 0.34), (x, -0.005, 0.305))
+        cuff  = box(f'cuff_{side}',  M['strap'], (0.14, 0.155, 0.07), (x, -0.01, 0.43))
+        boot  = box(f'boot_{side}',  M['boots'], (0.15, 0.25, 0.12), (x, -0.05, 0.06))
+        sole  = box(f'sole_{side}',  M['gund'],  (0.16, 0.26, 0.035), (x, -0.05, 0.0175))
+        shinJ = join([shin, cuff, boot, sole], f'shin_{side}', (x, 0, 0.49))
+        parent_to(shinJ, leg)
+        parent_to(leg, root)
 
-    # ---- 躯干（pivot 骨盆 z=0.86）----
+    # ---- 躯干（pivot 骨盆 0.94）----
     torso_geo = [
-        box('hips',   M['dark'],  (0.34, 0.24, 0.14), (0, 0, 0.90)),
-        box('chest',  M['tmain'], (0.40, 0.24, 0.42), (0, 0, 1.19)),
-        box('belt',   M['strap'], (0.42, 0.26, 0.07), (0, 0, 0.955)),
-        box('buckle', M['gunl'],  (0.08, 0.27, 0.05), (0, 0, 0.955)),
-        # 战术背心
-        box('vest',   M['tvest'], (0.36, 0.30, 0.36), (0, -0.005, 1.20)),
-        box('pouch1', M['strap'], (0.09, 0.05, 0.11), (-0.10, -0.165, 1.14)),
-        box('pouch2', M['strap'], (0.09, 0.05, 0.11), (0.0,  -0.165, 1.14)),
-        box('pouch3', M['strap'], (0.09, 0.05, 0.11), (0.10, -0.165, 1.14)),
-        box('strapL', M['strap'], (0.05, 0.035, 0.30), (-0.13, -0.03, 1.34)),
-        box('strapR', M['strap'], (0.05, 0.035, 0.30), (0.13, -0.03, 1.34)),
-        # 肩甲
-        box('padL',   M['tvest'], (0.10, 0.24, 0.08), (-0.235, 0, 1.375)),
-        box('padR',   M['tvest'], (0.10, 0.24, 0.08), (0.235, 0, 1.375)),
-        # 背包
-        box('pack',   M['tvest'], (0.28, 0.14, 0.34), (0, 0.175, 1.16)),
-        box('packtop',M['strap'], (0.20, 0.12, 0.08), (0, 0.185, 1.36)),
-        box('roll',   M['sand'],  (0.30, 0.10, 0.10), (0, 0.19, 1.44)),
+        box('hips',   M['dark'],  (0.34, 0.25, 0.13), (0, 0, 0.965)),
+        box('chest',  M['tmain'], (0.40, 0.235, 0.44), (0, 0, 1.215)),
+        box('belt',   M['strap'], (0.415, 0.255, 0.06), (0, 0, 0.985)),
+        box('buckle', M['gunl'],  (0.08, 0.265, 0.045), (0, 0, 0.985)),
+        # 战术背心 + 弹匣袋
+        box('vest',   M['tvest'], (0.355, 0.30, 0.34), (0, -0.005, 1.215)),
+        box('pouch1', M['strap'], (0.085, 0.05, 0.10), (-0.095, -0.165, 1.15)),
+        box('pouch2', M['strap'], (0.085, 0.05, 0.10), (0.0,   -0.165, 1.15)),
+        box('pouch3', M['strap'], (0.085, 0.05, 0.10), (0.095, -0.165, 1.15)),
+        box('suspL',  M['strap'], (0.05, 0.035, 0.28), (-0.125, -0.02, 1.36)),
+        box('suspR',  M['strap'], (0.05, 0.035, 0.28), (0.125, -0.02, 1.36)),
+        # 对讲机 + 天线
+        box('radio',  M['gund'],  (0.05, 0.065, 0.10), (0.145, -0.14, 1.32)),
+        cyl('antenna', M['gund'], 0.007, 0.30, (0.145, -0.115, 1.50), verts=6, bevel=0),
+        # 背包 + 卷毯 + 水壶
+        box('pack',   M['tvest'], (0.27, 0.13, 0.32), (0, 0.175, 1.17)),
+        box('packtop',M['strap'], (0.19, 0.11, 0.07), (0, 0.185, 1.365)),
+        box('roll',   M['sand'],  (0.29, 0.10, 0.10), (0, 0.195, 1.435), bevel=0.03),
+        cyl('canteen', M['sand'], 0.05, 0.11, (-0.155, 0.155, 1.03), verts=10),
+        # 肩甲 + 领口
+        box('padL',   M['tvest'], (0.09, 0.23, 0.075), (-0.235, 0, 1.40)),
+        box('padR',   M['tvest'], (0.09, 0.23, 0.075), (0.235, 0, 1.40)),
+        box('collar', M['strap'], (0.19, 0.15, 0.045), (0, -0.045, 1.455)),
     ]
-    torso = join(torso_geo, 'torso', (0, 0, 0.86))
+    torso = join(torso_geo, 'torso', (0, 0, 0.94))
     parent_to(torso, root)
 
-    # ---- 头（pivot 颈 z=1.42）----
-    neck  = box('neck',  M['skin'], (0.10, 0.10, 0.09), (0, 0, 1.445))
-    head  = box('head',  M['skin'], (0.21, 0.22, 0.22), (0, -0.005, 1.565))
-    helm  = box('helm',  M['tmain'], (0.255, 0.26, 0.15), (0, 0, 1.665))
-    helmr = box('helmr', M['tmain'], (0.245, 0.25, 0.06), (0, -0.01, 1.588))
-    helmTop = sph('helmTop', M['tmain'], 0.132, (0, 0, 1.735), detail=1)
-    visor = box('visor', M['visor'], (0.185, 0.055, 0.075), (0, -0.125, 1.585))
-    mask  = box('mask',  M['mask'],  (0.15, 0.05, 0.10), (0, -0.112, 1.50))
-    chin  = box('chin',  M['mask'],  (0.16, 0.10, 0.045), (0, -0.10, 1.452))
-    headj = join([neck, head, helm, helmr, helmTop, visor, mask, chin], 'head', (0, 0, 1.42))
+    # ---- 头（pivot 颈 1.50）：圆盔+耳罩+护目镜框+面罩 ----
+    neck  = box('neck',  M['skin'], (0.10, 0.10, 0.07), (0, 0, 1.515))
+    face  = box('face',  M['skin'], (0.195, 0.205, 0.20), (0, -0.005, 1.60))
+    helm  = box('helm',  M['tmain'], (0.245, 0.25, 0.13), (0, 0.005, 1.685))
+    helmT = sph('helmT', M['tmain'], 0.127, (0, 0.0, 1.742), detail=2)
+    brim  = box('brim',  M['tmain'], (0.255, 0.245, 0.045), (0, -0.012, 1.616))
+    earL  = box('earL',  M['mask'],  (0.035, 0.085, 0.095), (-0.122, 0.0, 1.60))
+    earR  = box('earR',  M['mask'],  (0.035, 0.085, 0.095), (0.122, 0.0, 1.60))
+    vfr   = box('vfr',   M['gund'],  (0.185, 0.06, 0.04), (0, -0.118, 1.60))
+    visor = box('visor', M['visor'], (0.165, 0.045, 0.06), (0, -0.118, 1.628))
+    mask  = box('mask',  M['mask'],  (0.145, 0.045, 0.085), (0, -0.10, 1.535))
+    headj = join([neck, face, helm, helmT, brim, earL, earR, vfr, visor, mask], 'head', (0, 0, 1.50))
     parent_to(headj, torso)
 
-    # ---- 手臂（pivot 肩 z=1.36）----
-    arms = {}
+    # ---- 手臂：上臂(arm) + 前臂(fore，挂在臂下)，pivot 肩/肘 ----
     for side, sx in (('L', -1), ('R', 1)):
-        x = 0.27 * sx
-        up   = box(f'up_{side}',   M['tmain'], (0.115, 0.115, 0.36), (x + 0.012*sx, 0, 1.16))
-        fore = box(f'fore_{side}', M['tmain'], (0.10, 0.10, 0.30), (x + 0.02*sx, -0.015, 0.86))
-        elb  = box(f'elb_{side}',  M['strap'], (0.115, 0.115, 0.07), (x + 0.016*sx, -0.008, 1.0))
-        hand = box(f'hand_{side}', M['glove'], (0.10, 0.11, 0.12), (x + 0.022*sx, -0.03, 0.685))
-        arms[side] = join([up, fore, elb, hand], f'arm_{side}', (x, 0, 1.36))
-        parent_to(arms[side], torso)
+        x = 0.26 * sx
+        delt  = sph(f'delt_{side}', M['tmain'], 0.078, (x + 0.005*sx, 0, 1.405), detail=1)
+        upper = box(f'upper_{side}', M['tmain'], (0.112, 0.112, 0.26), (x + 0.008*sx, 0, 1.265))
+        arm = join([delt, upper], f'arm_{side}', (x, 0, 1.42))
+        fore  = box(f'foreb_{side}', M['tmain'], (0.095, 0.095, 0.24), (x + 0.014*sx, -0.008, 0.975))
+        elbp  = box(f'elbp_{side}',  M['strap'], (0.115, 0.115, 0.075), (x + 0.012*sx, -0.002, 1.115), bevel=0.025)
+        hand  = box(f'hand_{side}',  M['glove'], (0.095, 0.10, 0.115), (x + 0.016*sx, -0.028, 0.835))
+        thumb = box(f'thumb_{side}', M['glove'], (0.03, 0.045, 0.05), (x + 0.016*sx + 0.055*sx, -0.02, 0.85))
+        foreJ = join([fore, elbp, hand, thumb], f'fore_{side}', (x + 0.012*sx, 0, 1.13))
+        parent_to(foreJ, arm)
+        parent_to(arm, torso)
 
-    # ---- 步枪（挂在躯干，已摆到双手之间的持枪位）----
+    # ---- 步枪（同 v1，细节略增：导轨块、枪带环）----
     gun = [
         cyl('barrel', M['gun'], 0.022, 0.42, (0.12, -0.32, 1.235), rot=(math.pi/2, 0, 0), verts=10),
         cyl('muzz',   M['gund'], 0.028, 0.08, (0.12, -0.545, 1.235), rot=(math.pi/2, 0, 0), verts=10),
         box('recv',   M['gun'],  (0.06, 0.26, 0.095), (0.12, -0.05, 1.235)),
         box('rail',   M['gund'], (0.03, 0.24, 0.022), (0.12, -0.10, 1.292)),
+        box('rail2',  M['gund'], (0.022, 0.03, 0.018), (0.12, -0.16, 1.31)),
         box('handgrd',M['gund'], (0.055, 0.17, 0.07), (0.12, -0.235, 1.235)),
+        box('foregrip',M['gund'],(0.035, 0.05, 0.09), (0.12, -0.30, 1.17), rot=(0.25, 0, 0)),
         box('mag',    M['gund'], (0.05, 0.075, 0.15), (0.12, 0.015, 1.12), rot=(-0.22, 0, 0)),
+        box('magbase',M['gunl'], (0.055, 0.08, 0.02), (0.12, 0.015, 1.045), rot=(-0.22, 0, 0)),
         box('grip',   M['gund'], (0.045, 0.06, 0.115), (0.12, 0.085, 1.135), rot=(0.30, 0, 0)),
         box('stock',  M['gun'],  (0.05, 0.17, 0.10), (0.12, 0.20, 1.22)),
         box('stockp', M['gund'], (0.055, 0.045, 0.12), (0.12, 0.285, 1.22)),
         box('sightF', M['gund'], (0.022, 0.02, 0.045), (0.12, -0.30, 1.30)),
+        box('eject',  M['gund'], (0.018, 0.06, 0.03), (0.155, -0.02, 1.235)),
+        box('slingR', M['gunl'], (0.014, 0.014, 0.05), (0.12, 0.14, 1.16)),
         box('laser',  M['gund'], (0.025, 0.045, 0.03), (0.145, -0.20, 1.20)),
     ]
     rifle = join(gun, 'rifle', (0.12, 0.085, 1.135))

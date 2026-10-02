@@ -7,14 +7,16 @@ export const WEAPONS = {
     dmg: 25, headMul: 2.0, rpm: 640, mag: 30, reserve: 150,
     spreadStand: 1.7, spreadAds: 0.45, spreadMove: 1.3, spreadJump: 3.2,
     recoil: 0.85, recoilAds: 0.5, reload: 2.1, kick: 0.05,
-    adsFov: 55, tracer: '#ffd27a', pellete: 1, range: 70,
+    adsFov: 52, tracer: '#ffd27a', pellete: 1, range: 70,
+    optic: 'holo', opticName: '全息镜 ×1.4', modes: ['AUTO', '三连发'],
   },
   sg: {
     id: 'sg', name: '霰弹枪 SG-8', slot: 2, auto: false,
     dmg: 11, headMul: 1.5, rpm: 78, mag: 6, reserve: 36,
     spreadStand: 5.2, spreadAds: 3.8, spreadMove: 1.0, spreadJump: 2.0,
     recoil: 3.2, recoilAds: 2.6, reload: 2.6, kick: 0.14,
-    adsFov: 60, tracer: '#ffbe5e', pellets: 8, range: 26,
+    adsFov: 62, tracer: '#ffbe5e', pellets: 8, range: 26,
+    optic: 'iron', opticName: '机瞄 ×1.2',
   },
   sr: {
     id: 'sr', name: '狙击枪 SR-50', slot: 3, auto: false,
@@ -22,6 +24,7 @@ export const WEAPONS = {
     spreadStand: 6.0, spreadAds: 0.06, spreadMove: 2.0, spreadJump: 5.0,
     recoil: 4.5, recoilAds: 3.0, reload: 2.9, kick: 0.2,
     adsFov: 20, tracer: '#bfe8ff', pellets: 1, range: 150, scope: true,
+    optic: 'scope', opticName: '高倍镜 ×3.8 / ×7.5', zoom2Fov: 10,
   },
   pg: {
     id: 'pg', name: '手枪 P-9', slot: 4, auto: false,
@@ -29,6 +32,7 @@ export const WEAPONS = {
     spreadStand: 2.2, spreadAds: 0.9, spreadMove: 1.0, spreadJump: 2.6,
     recoil: 1.1, recoilAds: 0.7, reload: 1.5, kick: 0.06,
     adsFov: 60, tracer: '#ffe1a0', pellets: 1, range: 45,
+    optic: 'iron', opticName: '机瞄 ×1.25',
   },
 };
 export const WEAPON_ORDER = ['ar', 'sg', 'sr', 'pg'];

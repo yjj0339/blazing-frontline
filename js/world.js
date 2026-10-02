@@ -1,5 +1,6 @@
 // ===== 世界：地图布局、碰撞、路点网、视线 =====
 import * as THREE from '../vendor/three.module.js';
+import { mergeGeometries } from '../vendor/examples/jsm/utils/BufferGeometryUtils.js';
 import { MAP_HALF, TEAM_COLOR } from './config.js';
 
 const H = MAP_HALF; // 40
@@ -52,13 +53,13 @@ export class World {
     scene.fog = new THREE.Fog(0xcfe5f4, 70, 210);
 
     // 远山剪影（雾中层次）
-    const mountMat = new THREE.MeshBasicMaterial({ color: 0xa8c2da, fog: true });
+    const mountMat = new THREE.MeshBasicMaterial({ color: 0x8fa9c4, fog: true });
     for (let i = 0; i < 10; i++) {
       const ang = (i / 10) * Math.PI * 2 + 0.35;
       const r = 175 + Math.random() * 55;
-      const h = 26 + Math.random() * 34;
-      const m = new THREE.Mesh(new THREE.ConeGeometry(26 + Math.random() * 20, h, 5), mountMat);
-      m.position.set(Math.cos(ang) * r, h / 2 - 3, Math.sin(ang) * r);
+      const h = 20 + Math.random() * 26;
+      const m = new THREE.Mesh(new THREE.ConeGeometry(30 + Math.random() * 22, h, 5), mountMat);
+      m.position.set(Math.cos(ang) * r, h / 2 - 6, Math.sin(ang) * r);
       m.rotation.y = Math.random() * Math.PI;
       scene.add(m);
     }
@@ -125,22 +126,27 @@ export class World {
     mkWall(-H - 0.5, 0, 1, H * 2 + 2);
     mkWall(H + 0.5, 0, 1, H * 2 + 2);
 
-    // ---------- 道具 ----------
+    // ---------- 道具（静态几何按材质合并，200+ draw call → 十几个）----------
+    const staticByMat = new Map();
     const place = (proto, x, z, rotY = 0, tint = null, scale = 1) => {
       const o = proto.clone(true);
       o.position.set(x, 0, z);
       o.rotation.y = rotY;
       if (scale !== 1) o.scale.setScalar(scale);
-      if (tint !== null) {
-        o.traverse((c) => {
-          if (c.isMesh && c.material) {
-            c.material = c.material.clone();
-            c.material.color = new THREE.Color(tint);
-          }
-        });
-      }
-      o.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
-      scene.add(o);
+      o.updateMatrixWorld(true);
+      o.traverse((c) => {
+        if (!c.isMesh || !c.geometry?.attributes?.position) return;
+        let mat = c.material;
+        let key = mat.uuid;
+        if (tint !== null) {
+          mat = mat.clone();
+          mat.color = new THREE.Color(tint);
+          key = 'tint' + tint;
+        }
+        const g = c.geometry.clone().applyMatrix4(c.matrixWorld);
+        if (!staticByMat.has(key)) staticByMat.set(key, { mat, geos: [] });
+        staticByMat.get(key).geos.push(g);
+      });
       return o;
     };
     const container = pick('Container');
@@ -246,6 +252,18 @@ export class World {
       place(barrel, x, z, Math.random() * 3);
       this.addCollider(x, z, 0.58, 0.58, 0.9, 'barrel');
     }
+
+    // 合并静态几何
+    for (const { mat, geos } of staticByMat.values()) {
+      if (!geos.length) continue;
+      const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+      const mesh = new THREE.Mesh(merged, mat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+      this.solids.push(mesh);
+    }
+    geosCleanup(staticByMat);
 
     // 出生点（营地前方开阔区，面向场中心）
     for (let i = 0; i < 8; i++) {
@@ -466,4 +484,8 @@ export class World {
     const w = this.waypoints[(Math.random() * this.waypoints.length) | 0];
     return w ? { x: w.x, z: w.z } : { x: 0, z: 0 };
   }
+}
+
+function geosCleanup(byMat) {
+  for (const { geos } of byMat.values()) geos.forEach((g) => g.dispose());
 }

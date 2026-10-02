@@ -54,6 +54,39 @@ body { font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; col
 }
 #scope-overlay::before { left: 0; right: 0; top: 50%; height: 1.5px; }
 #scope-overlay::after { top: 0; bottom: 0; left: 50%; width: 1.5px; }
+#scope-overlay.x2 { background: radial-gradient(circle at 50% 50%, transparent 0 24vmin, rgba(8,10,12,0.985) 25vmin); }
+
+/* 全息镜（AR ADS）：圆框 + 红点，保留视野 */
+#holo-overlay { position: absolute; inset: 0; opacity: 0; transition: opacity 0.12s; pointer-events: none; }
+#holo-overlay.show { opacity: 1; }
+#holo-overlay .ring {
+  position: absolute; left: 50%; top: 50%; width: 30vmin; height: 30vmin;
+  transform: translate(-50%, -50%);
+  border: 2.5px solid rgba(60, 200, 120, 0.5); border-radius: 50%;
+  box-shadow: inset 0 0 30px rgba(30,80,50,0.25), 0 0 8px rgba(0,0,0,0.4);
+}
+#holo-overlay .dot {
+  position: absolute; left: 50%; top: 50%; width: 1.1vmin; height: 1.1vmin;
+  transform: translate(-50%, -50%);
+  background: #ff4a3a; border-radius: 50%;
+  box-shadow: 0 0 8px #ff4a3a;
+}
+
+/* 换弹进度条（准星下方） */
+#reload-bar {
+  position: absolute; left: 50%; top: 56%; width: 120px; margin-left: -60px;
+  height: 5px; border-radius: 3px; background: rgba(255,252,245,0.35);
+  opacity: 0; transition: opacity 0.15s; pointer-events: none;
+}
+#reload-bar.show { opacity: 1; }
+#reload-bar div { height: 100%; width: 0; border-radius: 3px; background: #ffd25e; }
+
+/* 弹药警戒色 */
+#ammo-mag.warn { color: #e08a2c; }
+#ammo-mag.empty { color: #d0452f; }
+
+/* 命中时准星闪红 */
+#crosshair.hitflash .xh { background: #ff5a4d; }
 
 /* 顶部比分 */
 #score-top {

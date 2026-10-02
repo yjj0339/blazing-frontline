@@ -76,8 +76,31 @@ def render(fname):
 clear()
 sun()
 s = load('soldier.glb')
+s.rotation_euler.z = 0
 setup_cam((1.6, -3.4, 1.3), (0, 0, 0.95))
 render('preview_soldier_front.png')
+
+clear()
+sun()
+s = load('soldier.glb')
+# 摆持枪姿态（与 bots.js 相同的两段肢体参数）
+import mathutils
+def get(name):
+    return next(o for o in bpy.data.objects if o.name == name)
+def fin(o, x, y=0.0, z=0.0):
+    o.rotation_euler.x += x; o.rotation_euler.y += y; o.rotation_euler.z += z
+for o in bpy.data.objects:
+    o.rotation_mode = 'XYZ'
+fin(get('arm_R'), -1.05, 0, -0.32)
+fin(get('fore_R'), -0.62)
+fin(get('arm_L'), -1.28, 0.32, 0.42)
+fin(get('fore_L'), -0.75)
+fin(get('leg_R'), 0.18)
+fin(get('shin_R'), 0.22)
+fin(get('leg_L'), -0.12)
+bpy.context.view_layer.update()
+setup_cam((2.2, -3.2, 1.4), (0.05, 0, 1.15))
+render('preview_soldier_pose.png')
 
 clear()
 sun()

@@ -76,6 +76,14 @@ export class Bot {
   }
 
   sense(dt) {
+    // 帧级状态衰减
+    this.loseT += (this.state === 'combat') ? dt : 0;
+    if (this.heardShotT > 0) this.heardShotT -= dt;
+    // 视线扫描节流（错峰，全场射线检测大头）
+    this.senseT = (this.senseT ?? Math.random() * 0.15) - dt;
+    if (this.senseT > 0) return;
+    this.senseT = 0.13 + Math.random() * 0.08;
+
     const g = this.game;
     let best = null, bd = Infinity;
     for (const u of g.allUnits()) {
@@ -95,19 +103,15 @@ export class Bot {
       this.lastSeen = best.pos.clone();
       this.loseT = 0;
     } else if (this.state === 'combat') {
-      this.loseT += dt;
       if (!this.target || !this.target.alive || this.loseT > 2.5 || !this.canSee(this.target)) {
         this.state = 'hunt';
         this.burstLeft = 0;
       }
     }
     // 枪声吸引
-    if (this.heardShotT > 0) {
-      this.heardShotT -= dt;
-      if (this.state === 'roam' && this.heardPos) {
-        this.state = 'hunt';
-        this.lastSeen = this.heardPos.clone();
-      }
+    if (this.heardShotT > 0 && this.state === 'roam' && this.heardPos) {
+      this.state = 'hunt';
+      this.lastSeen = this.heardPos.clone();
     }
     if (this.target && !this.target.alive) { this.target = null; if (this.state === 'combat') this.state = 'hunt'; }
   }
@@ -381,12 +385,18 @@ export class Bot {
         }
       }
     });
-    for (const n of ['head', 'torso', 'arm_L', 'arm_R', 'leg_L', 'leg_R', 'rifle']) {
+    for (const n of ['head', 'torso', 'arm_L', 'arm_R', 'fore_L', 'fore_R', 'leg_L', 'leg_R', 'shin_L', 'shin_R', 'rifle']) {
       parts[n] = root.getObjectByName(n);
     }
-    // 持枪姿态
-    if (parts.arm_R) parts.arm_R.rotation.set(-1.25, 0, -0.18);
-    if (parts.arm_L) parts.arm_L.rotation.set(-1.45, 0.25, 0.5);
+    // 两段肢体持枪姿：手臂自然前持，枪体贴到双手
+    if (parts.arm_R) parts.arm_R.rotation.set(-1.32, 0, -0.16);
+    if (parts.fore_R) parts.fore_R.rotation.set(-0.52, 0, 0);
+    if (parts.arm_L) parts.arm_L.rotation.set(-1.52, 0.5, 0.34);
+    if (parts.fore_L) parts.fore_L.rotation.set(-0.42, 0, 0);
+    if (parts.rifle) {
+      parts.rifle.position.set(0.005, -0.09, 0.34);
+      parts.rifle.rotation.set(0.06, 0, 0);
+    }
     this.parts = parts;
     this.mesh = root;
     root.visible = false;
@@ -409,15 +419,20 @@ export class Bot {
     m.position.copy(this.pos);
     m.rotation.set(0, this.yaw + Math.PI, 0);
     const spK = Math.min(1, this.moveSpeed / 4);
-    const s = Math.sin(this.walkPhase), c = Math.sin(this.walkPhase + Math.PI);
-    if (this.parts.leg_L) this.parts.leg_L.rotation.x = s * 0.6 * spK;
-    if (this.parts.leg_R) this.parts.leg_R.rotation.x = c * 0.6 * spK;
-    if (this.parts.torso) {
-      this.parts.torso.rotation.x = 0.06 * spK + Math.abs(s) * 0.02;
-      this.parts.torso.position.y = Math.abs(Math.sin(this.walkPhase)) * 0.035 * spK;
+    const p = this.walkPhase, P = this.parts;
+    const s = Math.sin(p), c = Math.sin(p + Math.PI);
+    // 两段腿：大腿摆动 + 膝盖滞后弯曲（只能后弯）
+    if (P.leg_L) P.leg_L.rotation.x = s * 0.52 * spK;
+    if (P.leg_R) P.leg_R.rotation.x = c * 0.52 * spK;
+    if (P.shin_L) P.shin_L.rotation.x = Math.max(0, Math.sin(p - 1.5)) * 0.85 * spK;
+    if (P.shin_R) P.shin_R.rotation.x = Math.max(0, Math.sin(p + Math.PI - 1.5)) * 0.85 * spK;
+    if (P.torso) {
+      P.torso.rotation.x = 0.06 * spK + Math.abs(s) * 0.02;
+      P.torso.position.y = Math.abs(Math.sin(p)) * 0.035 * spK;
     }
-    if (this.parts.arm_R) this.parts.arm_R.rotation.x = -1.25 + c * 0.1 * spK;
-    if (this.parts.arm_L) this.parts.arm_L.rotation.x = -1.45 + s * 0.1 * spK;
+    // 手臂保持持枪 + 轻微摆动
+    if (P.arm_R) P.arm_R.rotation.x = -1.32 + c * 0.06 * spK;
+    if (P.arm_L) P.arm_L.rotation.x = -1.52 + s * 0.06 * spK;
   }
 
   die() {

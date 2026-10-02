@@ -54,14 +54,20 @@ class SparkPool {
       this.items.push({ m, v: new THREE.Vector3(), t: 0 });
     }
   }
-  burst(pos, color, n = 6, speed = 5) {
+  burst(pos, color, n = 6, speed = 5, awayFrom = null) {
     let c = 0;
     for (const it of this.items) {
       if (it.t > 0) continue;
       it.m.position.copy(pos);
       it.m.material.color.set(color);
-      it.v.set((Math.random() - 0.5) * 2, Math.random() * 1.4, (Math.random() - 0.5) * 2).normalize().multiplyScalar(speed * (0.5 + Math.random()));
-      it.t = 0.3 + Math.random() * 0.25;
+      it.v.set((Math.random() - 0.5) * 2, Math.random() * 0.8, (Math.random() - 0.5) * 2).normalize().multiplyScalar(speed * (0.5 + Math.random()));
+      // 火花背向镜头飞，避免糊脸放大成色块
+      if (awayFrom) {
+        const away = pos.clone().sub(awayFrom);
+        away.y = 0;
+        if (away.lengthSq() > 1e-6) it.v.addScaledVector(away.normalize(), speed * 0.9);
+      }
+      it.t = 0.26 + Math.random() * 0.2;
       it.m.visible = true;
       if (++c >= n) break;
     }
@@ -227,9 +233,10 @@ class ViewModel {
     this.kick = Math.max(0, this.kick - dt * 9);
     this.swapT = Math.max(0, this.swapT - dt);
     const ads = player.adsT;
-    // 腰射位 ↔ 机瞄位（贴中）
+    // 腰射位 ↔ 机瞄位（贴中；AR 照门粗大，整体再下沉避免糊视野）
+    const isAR = this.game.inv.current === 'ar';
     const hip = new THREE.Vector3(0.16, -0.155, -0.34);
-    const aim = new THREE.Vector3(0, -0.088, -0.26);
+    const aim = new THREE.Vector3(0, isAR ? -0.135 : -0.088, isAR ? -0.3 : -0.26);
     const p = hip.clone().lerp(aim, ads);
     const sprintK = inp.sprint && player.moveSpeed > 5 ? 1 : 0;
     // 奔跑摆枪
@@ -268,6 +275,8 @@ export class Inventory {
     this.reloadT = 0;
     this.swapT = 0;
     this.triggerHeld = false;
+    this.burstLeft = 0;
+    this.fireMode = 0;      // AR：AUTO / 三连发
     this.grenades = GRENADE.carry;
     this.grenadeT = 0;
   }
@@ -294,6 +303,13 @@ export class Inventory {
   cycle(dir) {
     const i = WEAPON_ORDER.indexOf(this.current);
     this.switchTo(WEAPON_ORDER[(i + dir + 4) % 4]);
+  }
+  switchFireMode() {
+    const w = this.w;
+    if (!w.modes) return;
+    this.fireMode = (this.fireMode + 1) % w.modes.length;
+    this.game.ui.streakBanner(`${w.name} · ${w.modes[this.fireMode]}`);
+    this.game.ui.refreshAmmo();
   }
   startReload() {
     const w = this.w, st = this.st;
@@ -374,16 +390,32 @@ export class Weapons {
     } else inp.grenade = false;
 
     const want = inp.firing;
+    const edge = want && !this._prevFiring;
+    this._prevFiring = want;
     const w = inv.w;
-    if (want && inv.canFire()) {
-      if (inv.st.mag <= 0) { g.audio.dryFire(); inv.fireT = 0.2; return; }
-      this.playerFire();
+    const auto = w.auto && inv.fireMode === 0;
+    // 三连发队列
+    if (inv.burstLeft > 0 && inv.fireT <= 0 && inv.reloadT <= 0 && inv.swapT <= 0) {
+      if (inv.st.mag > 0 || (this.game.rewards && this.game.rewards.rampageT > 0)) this.playerFire();
+      else inv.burstLeft = 0;
     }
-    if (want && inv.st.mag === 0 && inv.fireT <= 0 && !inv._dryPlayed) {
+    const wantShot = auto ? want : (edge && !this._burstLatch);
+    if (wantShot && inv.canFire()) {
+      if (inv.st.mag <= 0 && !(this.game.rewards && this.game.rewards.rampageT > 0)) {
+        g.audio.dryFire(); inv.fireT = 0.2; return;
+      }
+      this.playerFire();
+      if (!auto && w.modes && inv.fireMode === 1) {
+        inv.burstLeft = 2;              // 三连发：首发出膛后还有 2 发
+        this._burstLatch = true;
+      }
+    }
+    if (!want) { this._burstLatch = false; }
+    if (!want && inv.st.mag === 0 && inv.fireT <= 0 && !inv._dryPlayed) {
       g.audio.dryFire(); inv.fireT = 0.25; inv._dryPlayed = true;
       inv.startReload();
     }
-    if (!want) inv._dryPlayed = false;
+    if (want) inv._dryPlayed = false;
     this.vm.update(dt, p, inp);
   }
 
@@ -417,9 +449,9 @@ export class Weapons {
       if (res.point) {
         this.tracers.fire(eye.clone().addScaledVector(dir, 1.2).addScaledVector(p.dir, 0.4), res.point, w.tracer);
         if (res.hitUnit) {
-          this.sparks.burst(res.point, anyHead ? 0xff5a4d : 0xffd27a, 5, 4);
+          this.sparks.burst(res.point, anyHead ? 0xff5a4d : 0xffd27a, 5, 4, eye);
         } else {
-          this.sparks.burst(res.point, 0xbfae8e, 4, 3);
+          this.sparks.burst(res.point, 0xbfae8e, 4, 3, eye);
         }
       }
     }
@@ -428,6 +460,11 @@ export class Weapons {
       g.ui.hitmarker(anyHead);
       g.audio.hit(anyHead);
     }
+    // 抛壳
+    const rightV = new THREE.Vector3(Math.cos(p.yaw), 0, -Math.sin(p.yaw));
+    const shellPos = eye.clone().addScaledVector(p.dir, 0.45).addScaledVector(rightV, 0.13);
+    shellPos.y -= 0.06;
+    this.sparks.burst(shellPos, 0xd8b04a, 2, 2.4);
     g.ui.refreshAmmo();
     g.botHearShot(p.pos, 42);
   }
