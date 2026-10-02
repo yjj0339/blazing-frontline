@@ -115,6 +115,11 @@ export class Bot {
   // ---------- 行为 ----------
   update(dt) {
     const g = this.game;
+    // 菜单/结束：待机战场漫游（不战斗，供主菜单背景）
+    if (g.state !== 'playing') {
+      if (this.alive) this.menuRoam(dt);
+      return;
+    }
     if (!this.alive) {
       this.deadT += dt;
       if (this.deadT < 0.4) {
@@ -155,6 +160,15 @@ export class Bot {
       wishX = f.x * adv + side.x * 0.75;
       wishZ = f.z * adv + side.z * 0.75;
       speed *= 0.62;
+      // 手雷：中距离偶发
+      this.nadeCd = Math.max(0, this.nadeCd - dt);
+      if (this.nadeCd <= 0 && dist > 8 && dist < 20 && Math.random() < 0.4) {
+        this.nadeCd = 15 + Math.random() * 10;
+        const from = this.eyePos().addScaledVector(this.forward(), 0.4);
+        const dir = new THREE.Vector3(t.pos.x - from.x, 0, t.pos.z - from.z).normalize();
+        g.weapons.grenades.throw_(from, dir, this);
+        g.botSay(this, '吃雷！', true);
+      }
       // 开火
       if (this.reactT <= 0 && this.reloadT <= 0 && Math.abs(this.angDiff(wantYaw, this.yaw)) < 0.14) {
         this.tryFire(t, dist, dt);
@@ -247,6 +261,34 @@ export class Bot {
     return pt;
   }
 
+  // 主菜单背景：安静巡逻
+  menuRoam(dt) {
+    if (!this.roamPt || Math.hypot(this.roamPt.x - this.pos.x, this.roamPt.z - this.pos.z) < 2.2) {
+      this.roamPt = this.game.world.randomRoam();
+      this.path = null;
+    }
+    if (!this.path && this.roamPt) {
+      this.path = this.game.world.findPath(this.pos, this.roamPt);
+      this.pathI = 0;
+    }
+    let wx = 0, wz = 0;
+    if (this.path) {
+      while (this.pathI < this.path.length - 1 &&
+        Math.hypot(this.path[this.pathI].x - this.pos.x, this.path[this.pathI].z - this.pos.z) < 1.5) this.pathI++;
+      const n = this.path[Math.min(this.pathI, this.path.length - 1)];
+      wx = n.x - this.pos.x; wz = n.z - this.pos.z;
+      const l = Math.hypot(wx, wz) || 1;
+      wx /= l; wz /= l;
+      this.turnToward(Math.atan2(-wx, -wz), dt, 5);
+    }
+    this.pos.x += wx * 3.1 * dt;
+    this.pos.z += wz * 3.1 * dt;
+    this.game.world.slide(this.pos, 0.38);
+    this.moveSpeed = (wx || wz) ? 3.1 : 0;
+    this.walkPhase += dt * (this.moveSpeed ? this.moveSpeed * 1.5 : 0);
+    this.updateMesh(dt);
+  }
+
   angDiff(a, b) {
     let d = a - b;
     while (d > Math.PI) d -= Math.PI * 2;
@@ -322,11 +364,21 @@ export class Bot {
   buildMesh(soldierGltf, teamMats) {
     const root = soldierGltf.scene.clone(true);
     const parts = {};
+    this.flashMats = [];
+    this.flashT = 0;
+    this.nadeCd = 9 + Math.random() * 10;
     root.traverse((o) => {
       if (o.isMesh) {
         o.castShadow = true;
-        if (o.material && o.material.name === 'T_main') o.material = teamMats.main;
-        else if (o.material && o.material.name === 'T_vest') o.material = teamMats.vest;
+        if (o.material && o.material.name === 'T_main') {
+          const m = teamMats.main.clone();   // 每人独立材质，供受击闪红
+          o.material = m;
+          this.flashMats.push(m);
+        } else if (o.material && o.material.name === 'T_vest') {
+          const m = teamMats.vest.clone();
+          o.material = m;
+          this.flashMats.push(m);
+        }
       }
     });
     for (const n of ['head', 'torso', 'arm_L', 'arm_R', 'leg_L', 'leg_R', 'rifle']) {
@@ -345,6 +397,15 @@ export class Bot {
   updateMesh(dt) {
     const m = this.mesh;
     if (!m) return;
+    // 受击闪红
+    if (this.flashT > 0) {
+      this.flashT -= dt;
+      const e = this.flashT > 0 ? 0.9 : 0;
+      for (const fm of this.flashMats) {
+        fm.emissive.setHex(e ? 0xff2a18 : 0x000000);
+        fm.emissiveIntensity = e;
+      }
+    }
     m.position.copy(this.pos);
     m.rotation.set(0, this.yaw + Math.PI, 0);
     const spK = Math.min(1, this.moveSpeed / 4);
@@ -369,6 +430,7 @@ export class Bot {
   damage(amount, from, head) {
     if (!this.alive) return;
     this.hp -= amount;
+    this.flashT = 0.09;   // 受击闪红
     if (from && from.alive && from !== this) {
       if (this.canSee(from)) {
         this.target = from;

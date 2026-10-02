@@ -47,7 +47,17 @@ export const PLAYER = {
 export const REWARDS = {
   uav: { kills: 3, time: 9, label: '侦察机', desc: '全图敌人暴露 9 秒' },
   strike: { kills: 6, label: '空袭', desc: '在准星处召唤 4 连爆' },
+  rampage: { kills: 9, time: 10, label: '狂暴', desc: '射速 +60% 弹匣无限' },
 };
+
+// 军衔成长
+export const RANKS = ['新兵', '列兵', '下士', '中士', '上士', '尉官', '少校', '上校', '将军', '战神', '传奇战场之王'];
+export function xpForLevel(l) { return Math.round(120 * (l - 1) * l / 2); }
+export function levelOf(xp) {
+  let l = 1;
+  while (l < RANKS.length && xp >= xpForLevel(l + 1)) l++;
+  return l;
+}
 
 export const BOT_NAMES = {
   blue: ['雷霆', '蓝鲸', '浪花', '飞鱼', '礁石', '海风'],

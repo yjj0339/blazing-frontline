@@ -50,6 +50,8 @@
   <div id="killfeed"></div>
   <div id="kill-banner"></div>
   <div id="streak-banner"></div>
+  <div id="combo-banner"></div>
+  <div id="ramp-overlay"><span>狂 暴 <b id="ramp-t"></b></span></div>
 
   <div id="hp-wrap">
     <div id="hp-track"><div id="hp-bar"></div></div>
@@ -92,6 +94,7 @@
       <button id="btn-help" class="btn ghost">玩法说明</button>
       <button id="btn-settings" class="btn ghost">设置</button>
     </div>
+    <div id="menu-rank"></div>
     <div id="menu-stats"></div>
   </div>
 </div>
@@ -116,7 +119,7 @@
       <tr><td>Tab</td><td>比分板</td></tr>
       <tr><td>Esc</td><td>暂停</td></tr>
     </table>
-    <p class="help-tip">小地图上只有<b>开过枪的敌人</b>会暴露红点 · 蹲下后射击更准 · 不受击 4.5 秒自动回血</p>
+    <p class="help-tip">连杀 3 / 6 / 9 解锁侦察机、空袭、狂暴 · 击杀回血 25 · 冲刺中按 C 滑铲 · 不受击 3.2 秒自动回血</p>
     <button id="help-close" class="btn primary">知道了</button>
   </div>
 </div>
@@ -162,6 +165,7 @@
     <h2 id="end-title">胜利</h2>
     <div id="end-score"></div>
     <div id="end-kd"></div>
+    <div id="end-xp"></div>
     <div class="menu-row">
       <button id="end-again" class="btn primary">再来一局</button>
       <button id="end-menu" class="btn ghost">返回主菜单</button>

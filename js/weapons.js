@@ -326,11 +326,13 @@ export class Inventory {
     }
   }
   canFire() {
-    return this.fireT <= 0 && this.reloadT <= 0 && this.swapT <= 0 && this.st.mag > 0;
+    const ramp = this.game.rewards && this.game.rewards.rampageT > 0;
+    return this.fireT <= 0 && this.reloadT <= 0 && this.swapT <= 0 && (this.st.mag > 0 || ramp);
   }
   consume() {
-    this.st.mag--;
-    this.fireT = 60 / this.w.rpm;
+    const ramp = this.game.rewards && this.game.rewards.rampageT > 0;
+    if (!ramp) this.st.mag--;
+    this.fireT = 60 / (this.w.rpm * (ramp ? 1.6 : 1));
   }
 }
 
@@ -392,6 +394,7 @@ export class Weapons {
     p.addRecoil(w.recoil * (1 - p.adsT * 0.45) * 0.017);
     this.vm.fireKick(w);
     g.addTrauma(0.035);
+    g._lastCombatT = performance.now() / 1000;
     this.muzzleT = 0.05;
     g.audio.shoot(w.id, null, null);
     // 扩散

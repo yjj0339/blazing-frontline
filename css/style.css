@@ -241,16 +241,16 @@ body { font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; col
 /* ---------- 菜单/弹窗 ---------- */
 #menu {
   position: fixed; inset: 0; z-index: 40;
-  background: linear-gradient(160deg, #fdf6e3 0%, #ffedcd 55%, #ffdcb0 100%);
+  background: linear-gradient(160deg, rgba(253,246,227,0.82) 0%, rgba(255,237,205,0.62) 55%, rgba(255,220,176,0.5) 100%);
   display: flex; align-items: center; justify-content: center; overflow-y: auto;
 }
 #menu::before {
   content: ""; position: absolute; inset: 0;
   background:
-    radial-gradient(circle at 78% 18%, rgba(255,190,80,0.5), transparent 42%),
-    radial-gradient(circle at 12% 82%, rgba(120,170,90,0.35), transparent 45%);
+    radial-gradient(circle at 78% 18%, rgba(255,190,80,0.35), transparent 42%),
+    radial-gradient(circle at 12% 82%, rgba(120,170,90,0.25), transparent 45%);
 }
-.menu-box { position: relative; width: min(560px, 94vw); text-align: center; padding: 26px 0; }
+.menu-box { position: relative; width: min(560px, 94vw); text-align: center; padding: 26px 22px; background: rgba(255,253,246,0.9); border-radius: 22px; box-shadow: 0 14px 44px rgba(90,60,20,0.22); }
 .menu-box h1 {
   font-size: 56px; font-weight: 900; letter-spacing: 14px; color: #d0452f;
   text-shadow: 0 4px 0 rgba(160,50,20,0.18);
@@ -277,8 +277,41 @@ body { font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; col
 .btn.ghost { background: rgba(255,255,255,0.7); border: 1.5px solid rgba(120,100,60,0.3); color: #6b5f48; }
 .menu-row { display: flex; gap: 10px; margin-top: 10px; }
 .menu-row .btn { flex: 1; font-size: 14px; padding: 10px; }
-#menu-stats { margin-top: 18px; font-size: 12.5px; color: #6b5f48; background: rgba(255,255,255,0.5); border-radius: 10px; padding: 8px; }
+#menu-stats { margin-top: 12px; font-size: 12.5px; color: #6b5f48; background: rgba(255,255,255,0.5); border-radius: 10px; padding: 8px; }
 #menu-stats b { color: #d0452f; }
+#menu-rank { margin-top: 12px; }
+.rank-line { display: flex; align-items: center; gap: 8px; background: linear-gradient(90deg, #fff4dc, #ffe7c2); border: 1px solid rgba(200,150,60,0.35); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+.rank-line b { color: #b06a10; font-size: 15px; }
+.rank-name { font-weight: 800; color: #6b4a10; }
+.rank-track { flex: 1; height: 8px; border-radius: 5px; background: rgba(120,90,40,0.18); overflow: hidden; }
+.rank-track div { height: 100%; background: linear-gradient(90deg, #ffb347, #d0452f); }
+.rank-xp { font-size: 11px; color: #8a7a5c; min-width: 74px; text-align: right; }
+
+/* 连击大字 */
+#combo-banner {
+  position: absolute; top: 40%; left: 50%; transform: translate(-50%,-50%) scale(0.5);
+  font-size: 44px; font-weight: 900; letter-spacing: 6px; color: #ffd25e;
+  text-shadow: 0 3px 0 #a45c10, 0 6px 16px rgba(0,0,0,0.5);
+  opacity: 0; pointer-events: none;
+}
+#combo-banner.show { opacity: 1; transform: translate(-50%,-50%) scale(1.05); transition: transform 0.12s cubic-bezier(.2,2.4,.4,1), opacity 0.1s; }
+#combo-banner.pop { animation: comboPop 0.14s; }
+@keyframes comboPop { from { transform: translate(-50%,-50%) scale(1.7); } }
+
+/* 狂暴金边 */
+#ramp-overlay {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.3s;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(255,180,40,0.34) 100%);
+}
+#ramp-overlay.show { opacity: 1; animation: rampPulse 1s infinite; }
+@keyframes rampPulse { 50% { opacity: 0.55; } }
+#ramp-overlay span {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  font-weight: 900; font-size: 17px; color: #ffd25e; text-shadow: 0 2px 5px rgba(0,0,0,0.6);
+  letter-spacing: 3px;
+}
+.xp-gain { color: #2f9e4f; font-weight: 900; font-size: 18px; }
+#end-xp { margin: 6px 0 4px; font-size: 14px; color: #6b5f48; }
 
 .modal {
   position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;

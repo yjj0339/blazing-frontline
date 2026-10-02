@@ -1,6 +1,6 @@
 // ===== 全部界面：HUD/菜单/结算/小地图/移动端 =====
 import * as THREE from '../vendor/three.module.js';
-import { MODES, DIFFS, WEAPONS, LS_SETTINGS, LS_STATS, TEAM_COLOR, REWARDS } from './config.js';
+import { MODES, DIFFS, WEAPONS, LS_SETTINGS, LS_STATS, TEAM_COLOR, REWARDS, RANKS, xpForLevel, levelOf } from './config.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -23,7 +23,7 @@ export class UI {
   }
   saveSettings() { localStorage.setItem(LS_SETTINGS, JSON.stringify(this.settings)); }
   loadStats() {
-    const def = { matches: 0, wins: 0, kills: 0, deaths: 0, bestStreak: 0 };
+    const def = { matches: 0, wins: 0, kills: 0, deaths: 0, bestStreak: 0, xp: 0 };
     try { return { ...def, ...JSON.parse(localStorage.getItem(LS_STATS) || '{}') }; } catch { return def; }
   }
   saveStats() { localStorage.setItem(LS_STATS, JSON.stringify(this.stats)); }
@@ -41,6 +41,7 @@ export class UI {
     this.hide('menu'); this.hide('end-panel'); this.hide('pause-panel');
     this.show('hud');
     this.game.state = 'playing';
+    this.showRamp(false);
     this.refreshRewards();
   }
 
@@ -94,8 +95,29 @@ export class UI {
   refreshMenuStats() {
     const s = this.stats;
     const kd = s.deaths ? (s.kills / s.deaths).toFixed(2) : s.kills.toFixed(2);
+    const lv = levelOf(s.xp || 0);
+    const cur = xpForLevel(lv), next = xpForLevel(lv + 1);
+    const pct = next > cur ? Math.min(100, Math.round((s.xp - cur) / (next - cur) * 100)) : 100;
+    $('menu-rank').innerHTML =
+      `<div class="rank-line"><b>Lv.${lv}</b> <span class="rank-name">${RANKS[lv - 1]}</span>` +
+      `<div class="rank-track"><div style="width:${pct}%"></div></div><span class="rank-xp">${s.xp || 0}/${next} XP</span></div>`;
     $('menu-stats').innerHTML =
       `出战 <b>${s.matches}</b> 场 · 胜 <b>${s.wins}</b> · 击杀 <b>${s.kills}</b> · 阵亡 <b>${s.deaths}</b> · K/D <b>${kd}</b> · 最高连杀 <b>${s.bestStreak}</b>`;
+  }
+
+  // 连击大字
+  showCombo(n) {
+    if (n < 2) return;
+    const el = $('combo-banner');
+    el.textContent = `×${n} 连 击`;
+    el.classList.remove('pop');
+    void el.offsetWidth;
+    el.classList.add('pop', 'show');
+    clearTimeout(this._cbT);
+    this._cbT = setTimeout(() => el.classList.remove('show'), 1200);
+  }
+  showRamp(on) {
+    $('ramp-overlay').classList.toggle('show', on);
   }
 
   bindSettings() {
@@ -172,6 +194,12 @@ export class UI {
     // 奖励条节流刷新（UAV 倒计时）
     this._rwT = (this._rwT || 0) + dt;
     if (this._rwT > 0.3) { this._rwT = 0; this.refreshRewards(); }
+    // 低血心跳
+    this.game.audio.heartbeatTick && this.game.audio.heartbeatTick(dt, p.hp);
+    // 狂暴倒计时显示
+    if (this.game.rewards && this.game.rewards.rampageT > 0) {
+      $('ramp-t').textContent = Math.ceil(this.game.rewards.rampageT) + 's';
+    }
     // 死亡重生提示
     const rp = $('respawn-tip');
     if (!p.alive) {
@@ -256,7 +284,7 @@ export class UI {
     const el = document.createElement('div');
     el.className = 'kf-item';
     const kName = killer ? `<span style="color:${TEAM_COLOR[killer.team]?.ui || '#fff'}">${killer.name}</span>` : '<span>战场</span>';
-    el.innerHTML = `${kName} <i class="kf-w">${head ? '爆头' : ''}${weaponName}</i> <span style="color:${TEAM_COLOR[victim.team]?.ui || '#fff'}">${victim.name}</span>`;
+    el.innerHTML = `${kName} <i class="kf-w">${head ? '★爆头' : ''}${weaponName}</i> <span style="color:${TEAM_COLOR[victim.team]?.ui || '#fff'}">${victim.name}</span>`;
     kf.prepend(el);
     while (kf.children.length > 5) kf.lastChild.remove();
     setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 400); }, 4200);
@@ -374,6 +402,7 @@ export class UI {
   showEnd(win, winTeam) {
     const g = this.game, p = g.player;
     this.hide('hud');
+    this.showRamp(false);
     $('end-title').textContent = win ? '胜  利' : '战  败';
     $('end-title').style.color = win ? '#2f9e4f' : '#d0452f';
     const acc = p.shotsFired ? Math.round(p.shotsHit / p.shotsFired * 100) : 0;
@@ -381,6 +410,8 @@ export class UI {
       ? `<span style="color:${TEAM_COLOR.blue.ui}">蓝队 ${g.score.blue}</span> : <span style="color:${TEAM_COLOR.red.ui}">${g.score.red} 红队</span>`
       : `你 ${g.score.blue} · 桂冠者 ${Math.max(...g.bots.map((b) => b.kills), 0)}`;
     $('end-kd').innerHTML = `击杀 <b>${p.kills}</b> · 阵亡 <b>${p.deaths}</b> · 连杀 <b>${p.streakBest || 0}</b> · 命中率 <b>${acc}%</b>`;
+    const lv = levelOf(this.stats.xp || 0);
+    $('end-xp').innerHTML = `<span class="xp-gain">+${g.xpGained || 0} XP</span> · 当前军衔 <b>Lv.${lv} ${RANKS[lv - 1]}</b>`;
     this.show('end-panel');
   }
 

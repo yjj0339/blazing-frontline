@@ -27,9 +27,9 @@ export class AudioSys {
   }
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
 
-  // --- 基础件 ---
-  _noise(dur, { freq = 2000, q = 1, gain = 1, type = 'bandpass', pan = 0, decay, attack = 0.002, out } = {}) {
-    const t = this.ctx.currentTime;
+  // --- 基础件（at = 绝对时间，可选）---
+  _noise(dur, { freq = 2000, q = 1, gain = 1, type = 'bandpass', pan = 0, decay, attack = 0.002, out, at } = {}) {
+    const t = at ?? this.ctx.currentTime;
     const src = this.ctx.createBufferSource();
     src.buffer = this.noiseBuf;
     src.playbackRate.value = 0.9 + Math.random() * 0.2;
@@ -44,8 +44,8 @@ export class AudioSys {
     src.connect(f).connect(g).connect(p).connect(out || this.master);
     src.start(t); src.stop(t + dur + 0.05);
   }
-  _tone(freq, dur, { type = 'sine', gain = 0.3, slide, pan = 0, delay = 0, out } = {}) {
-    const t = this.ctx.currentTime + delay;
+  _tone(freq, dur, { type = 'sine', gain = 0.3, slide, pan = 0, delay = 0, out, at } = {}) {
+    const t = (at ?? this.ctx.currentTime) + delay;
     const o = this.ctx.createOscillator();
     o.type = type; o.frequency.setValueAtTime(freq, t);
     if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, slide), t + dur);
@@ -114,10 +114,11 @@ export class AudioSys {
       this._tone(2900, 0.04, { type: 'square', gain: 0.22 });
     }
   }
-  kill() {
+  kill(combo = 1) {
     if (!this.ctx) return;
-    this._tone(660, 0.09, { type: 'triangle', gain: 0.3 });
-    this._tone(880, 0.14, { type: 'triangle', gain: 0.3, delay: 0.08 });
+    const k = Math.min(6, combo - 1);
+    this._tone(660 * Math.pow(1.06, k), 0.09, { type: 'triangle', gain: 0.3 });
+    this._tone(880 * Math.pow(1.06, k), 0.14, { type: 'triangle', gain: 0.3, delay: 0.08 });
   }
   streak(n) {
     if (!this.ctx) return;
@@ -174,5 +175,85 @@ export class AudioSys {
     lfo.connect(lg).connect(g.gain);
     src.connect(f).connect(g).connect(this.master);
     src.start(); lfo.start();
+  }
+
+  // ---------- 低血心跳 ----------
+  _heartTimer = 0;
+  heartbeatTick(dt, hp) {
+    if (!this.ctx || hp >= 30) { this._heartTimer = 0; return; }
+    this._heartTimer -= dt;
+    if (this._heartTimer <= 0) {
+      this._heartTimer = 0.75;
+      this._tone(58, 0.1, { type: 'sine', gain: 0.34, slide: 40 });
+      this._tone(52, 0.12, { type: 'sine', gain: 0.3, slide: 36, delay: 0.14 });
+    }
+  }
+}
+
+// ===== 动态战斗音乐（三档强度，全合成）=====
+export class MusicSys {
+  constructor(audio) {
+    this.a = audio;
+    this.intensity = 0;        // 0=巡航 1=接战 2=激战
+    this.step = 0;
+    this.nextT = 0;
+    this.bpm = 116;
+    this.timer = null;
+    this.gain = null;
+    // 小调贝斯音序（两小节 32 步）
+    this.bassLine = [55, 0, 55, 0, 65.4, 0, 55, 0, 49, 0, 49, 0, 58.3, 0, 49, 0,
+      55, 0, 55, 0, 65.4, 0, 73.4, 0, 82.4, 0, 73.4, 0, 65.4, 0, 58.3, 0];
+    this.lead = [440, 0, 0, 523, 0, 0, 659, 0, 587, 0, 0, 523, 0, 0, 440, 0];
+  }
+  start() {
+    if (this.timer || !this.a.ctx) return;
+    this.gain = this.a.ctx.createGain();
+    this.gain.gain.value = 0.55;
+    this.gain.connect(this.a.master);
+    this.nextT = this.a.ctx.currentTime + 0.1;
+    this.timer = setInterval(() => this._pump(), 80);
+  }
+  setIntensity(i) { if (i !== this.intensity) { this.intensity = i; } }
+  _pump() {
+    const a = this.a;
+    if (!a.ctx) return;
+    const sp = 60 / this.bpm / 4;
+    if (this.nextT < a.ctx.currentTime) this.nextT = a.ctx.currentTime + 0.05;
+    while (this.nextT < a.ctx.currentTime + 0.2) {
+      this._step(this.step % 32, this.nextT);
+      this.step++;
+      this.nextT += sp;
+    }
+  }
+  _step(s, t) {
+    const a = this.a, g = this.gain, I = this.intensity;
+    // 底鼓：巡航 1/8 拍；接战四踩
+    const kickSteps = I === 0 ? [0, 12, 16, 28] : [0, 4, 8, 12, 16, 20, 24, 28];
+    if (kickSteps.includes(s)) {
+      a._tone(130, 0.16, { type: 'sine', gain: 0.55, slide: 42, at: t, out: g });
+    }
+    // 军鼓（接战+）：2、4 拍
+    if (I >= 1 && (s === 8 || s === 24)) {
+      a._noise(0.09, { freq: 1700, q: 1.1, gain: I === 2 ? 0.34 : 0.22, at: t, out: g });
+    }
+    // 踩镲（激战全 8 分，接战后半拍）
+    if ((I === 2 && s % 2 === 0) || (I === 1 && s % 4 === 2)) {
+      a._noise(0.03, { freq: 8200, type: 'highpass', gain: 0.1, at: t, out: g });
+    }
+    // 贝斯
+    const bf = this.bassLine[s];
+    if (bf && I >= 1) {
+      a._tone(bf, 0.14, { type: 'sawtooth', gain: I === 2 ? 0.16 : 0.11, at: t, out: g });
+    }
+    // 巡航 pad（菜单/平缓）
+    if (I === 0 && (s === 0 || s === 16)) {
+      a._tone(220, 1.8, { type: 'triangle', gain: 0.05, at: t, out: g });
+      a._tone(277.2, 1.8, { type: 'triangle', gain: 0.04, at: t, out: g });
+    }
+    // 激战 lead 琶音
+    if (I === 2) {
+      const lf = this.lead[s % 16];
+      if (lf) a._tone(lf, 0.1, { type: 'square', gain: 0.05, at: t, out: g });
+    }
   }
 }

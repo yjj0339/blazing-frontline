@@ -8,7 +8,7 @@ import { Weapons } from './weapons.js';
 import { Inventory } from './weapons.js';
 import { BotManager } from './bots.js';
 import { UI } from './ui.js';
-import { AudioSys } from './audio.js';
+import { AudioSys, MusicSys } from './audio.js';
 
 const H = MAP_HALF;
 
@@ -26,12 +26,15 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.12;
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.08, 400);
     this.camera.rotation.order = 'YXZ';
     this.scene = new THREE.Scene();
     this.scene.add(this.camera);
 
     this.audio = new AudioSys();
+    this.music = new MusicSys(this.audio);
     this.world = new World();
     this.world.build(this.scene, assets.props);
     this.player = new Player(this);
@@ -52,8 +55,27 @@ export class Game {
     this.trauma = 0;
     this.uavT = 0;
     this.pendingStrikes = [];
-    this.rewards = { uav: false, strike: false };
+    this.rewards = { uav: false, strike: false, rampageT: 0 };
     this._lastSay = -9;
+    this.hitstopT = 0;
+    this.combo = 0;
+    this.comboT = 0;
+    this.menuAng = 0;
+    this.scorchPool = [];
+    for (let i = 0; i < 10; i++) {
+      const m = new THREE.Mesh(
+        new THREE.CircleGeometry(1.6, 16),
+        new THREE.MeshBasicMaterial({ color: 0x1c1a14, transparent: true, opacity: 0.55, depthWrite: false })
+      );
+      m.rotation.x = -Math.PI / 2;
+      m.position.y = 0.02;
+      m.visible = false;
+      this.scene.add(m);
+      this.scorchPool.push(m);
+    }
+    this._scorchI = 0;
+    // 菜单背景先跑起来
+    this.state = 'menu';
 
     this._resize();
     window.addEventListener('resize', () => this._resize());
@@ -62,6 +84,18 @@ export class Game {
     this._last = performance.now();
     this._tick = this._tick.bind(this);
     requestAnimationFrame(this._tick);
+
+    // 菜单背景：先摆一队 bot 在场上巡逻
+    this.bots.spawnAll('tdm');
+    const sp0 = this.world.spawns;
+    this.bots.bots.forEach((b, i) => {
+      const arr = b.team === 'blue' ? sp0.blue : sp0.red;
+      b.spawnAt(arr[i % arr.length].clone().add(new THREE.Vector3((Math.random() - 0.5) * 5, 0, (Math.random() - 0.5) * 5)));
+    });
+    // 首次交互解锁音频（浏览器策略）
+    window.addEventListener('pointerdown', () => {
+      this.audio.init(); this.audio.resume(); this.music.start();
+    }, { once: true });
 
     // 测试钩子
     const q = new URLSearchParams(location.search);
@@ -184,6 +218,12 @@ export class Game {
   }
   updateRewards(dt) {
     this.uavT = Math.max(0, this.uavT - dt);
+    if (this.rewards.rampageT > 0) {
+      this.rewards.rampageT -= dt;
+      if (this.rewards.rampageT <= 0) this.ui.showRamp(false);
+    }
+    this.comboT = Math.max(0, this.comboT - dt);
+    if (this.comboT <= 0) this.combo = 0;
     for (let i = this.pendingStrikes.length - 1; i >= 0; i--) {
       const s = this.pendingStrikes[i];
       s.t -= dt;
@@ -194,11 +234,19 @@ export class Game {
     }
   }
 
-  botSay(bot, text) {
+  botSay(bot, text, force) {
     const now = performance.now() / 1000;
-    if (now - this._lastSay < 2.0) return;
+    if (!force && now - this._lastSay < 2.0) return;
     this._lastSay = now;
     this.ui.botSay(bot, text);
+  }
+
+  addScorch(pos) {
+    const sc = this.scorchPool[this._scorchI++ % this.scorchPool.length];
+    sc.position.set(pos.x, 0.02 + Math.random() * 0.004, pos.z);
+    sc.rotation.z = Math.random() * Math.PI * 2;
+    sc.scale.setScalar(0.8 + Math.random() * 0.5);
+    sc.visible = true;
   }
 
   // ============ 命中 ============
@@ -275,6 +323,7 @@ export class Game {
     this.audio.explosion(pos, this.camera);
     this.weapons.sparks.burst(pos, 0xffa640, 22, 9);
     this.weapons.sparks.burst(pos, 0x6b6b6b, 14, 5);
+    this.addScorch(pos);
     const dCam = this.camera.position.distanceTo(pos);
     this.addTrauma(Math.max(0, 0.35 - dCam * 0.012));
     // 范围伤害
@@ -285,6 +334,7 @@ export class Game {
       const k = 1 - d / GRENADE.radius;
       let dmg = GRENADE.dmg * (0.35 + k * 0.65);
       if (!u.isPlayer && !(owner && owner.isPlayer)) dmg *= 0.6;
+      if (u.isPlayer && owner && !owner.isPlayer) dmg *= 0.55;   // bot 手雷对玩家减伤
       u.damage(dmg, owner && owner !== u ? owner : null, false);
       if (u.isPlayer && u.alive) {
         this.ui.vignette(0.7);
@@ -308,6 +358,7 @@ export class Game {
   onPlayerHurt(from, head, amount) {
     this.ui.vignette(Math.min(0.85, 0.3 + amount / 120));
     this.addTrauma(0.14);
+    this._lastCombatT = performance.now() / 1000;
     if (from) this.ui.damageDir(from.pos);
     this.audio.hurt();
   }
@@ -327,21 +378,30 @@ export class Game {
     this.ui.killfeed(killer, victim, head, wName);
 
     if (killer && killer.isPlayer && victim !== killer) {
-      // 击杀奖励：回血 + 连杀解锁
+      // 击杀奖励：回血 + 连击 + hitstop + 连杀解锁
       killer.hp = Math.min(PLAYER.hp, killer.hp + PLAYER.killHeal);
       this.ui.spawnHeal(PLAYER.killHeal);
+      this.hitstopT = 0.085;
+      this.combo = (this.comboT > 0 ? this.combo : 0) + 1;
+      this.comboT = 4;
+      this.ui.showCombo(this.combo);
       const n = killer.streak;
       if (n === REWARDS.uav.kills) { this.rewards.uav = true; this.ui.streakBanner('侦察机就绪 · 按 5 释放'); }
       if (n === REWARDS.strike.kills) { this.rewards.strike = true; this.ui.streakBanner('空袭就绪 · 按 6 释放'); }
+      if (n === REWARDS.rampage.kills) {
+        this.rewards.rampageT = REWARDS.rampage.time;
+        this.ui.streakBanner('狂暴！射速暴增 · 弹匣无限！');
+        this.ui.showRamp(true);
+      }
       this.ui.refreshRewards();
-      this.audio.kill();
+      this.audio.kill(this.combo);
       this.ui.hitmarker(head);
       this.addTrauma(0.05);
       this.ui.killBanner(head ? `爆头击杀 ${victim.name}！` : `击杀了 ${victim.name}`);
       if (n === 2) { this.ui.streakBanner('双杀！'); this.audio.streak(2); }
       else if (n === 3) { this.ui.streakBanner('三连杀！'); this.audio.streak(3); }
       else if (n === 4) { this.ui.streakBanner('四连杀！火力全开！'); this.audio.streak(4); }
-      else if (n >= 5) { this.ui.streakBanner(`${n} 连杀 · 杀神降临！`); this.audio.streak(5); }
+      else if (n >= 5 && n !== REWARDS.rampage.kills) { this.ui.streakBanner(`${n} 连杀 · 杀神降临！`); this.audio.streak(5); }
     }
     if (killer && !killer.isPlayer && killer !== victim) {
       this.botSay(killer, victim.isPlayer ? ['拿下指挥官！', '搞定一个！', '干净利落'][(Math.random() * 3) | 0]
@@ -397,6 +457,7 @@ export class Game {
   endMatch() {
     this.over = true;
     this.state = 'ended';
+    this.music.setIntensity(0);
     const p = this.player;
     let win;
     if (this.mode === 'tdm') win = this.score.blue > this.score.red;
@@ -405,11 +466,14 @@ export class Game {
       for (const b of this.bots.bots) top = Math.max(top, b.kills);
       win = p.kills >= top && p.kills >= MODES.ffa.scoreLimit;
     }
-    // 战绩
+    // 战绩 + 经验
     const s = this.ui.stats;
     s.matches++; if (win) s.wins++;
     s.kills += p.kills; s.deaths += p.deaths;
     s.bestStreak = Math.max(s.bestStreak || 0, p.streakBest || 0);
+    const gained = p.kills * 10 + (win ? 60 : 20) + (p.streakBest || 0) * 8;
+    s.xp = (s.xp || 0) + gained;
+    this.xpGained = gained;
     this.ui.saveStats();
     if (win) this.audio.win(); else this.audio.lose();
     if (document.exitPointerLock) document.exitPointerLock();
@@ -520,7 +584,19 @@ export class Game {
       }
     }
 
-    if (this.state === 'playing' && !this.over) {
+    if (this.state === 'menu') {
+      // 主菜单：相机绕战场缓巡，bot 自在巡逻
+      this.menuAng += dt * 0.045;
+      const r = 33;
+      this.camera.position.set(Math.cos(this.menuAng) * r, 13.5, Math.sin(this.menuAng) * r);
+      this.camera.lookAt(0, 1.5, 0);
+      for (const b of this.bots.bots) b.update(dt);
+    } else if (this.state === 'playing' && !this.over) {
+      // 击杀 hitstop：时间缓一拍
+      if (this.hitstopT > 0) {
+        this.hitstopT -= dt;
+        dt *= 0.22;
+      }
       this._consumeLook();
       // 连杀奖励按键
       if (this.input.useUav) { this.input.useUav = false; this.useUav(); }
@@ -535,8 +611,26 @@ export class Game {
       this.timeLeft -= dt;
       if (this.timeLeft <= 0) this.endMatch();
       this.ui.updateHUD(dt);
+      // 音乐强度
+      const hot = this.combo > 0 || this.rewards.rampageT > 0 || this.pendingStrikes.length > 0 ||
+        (performance.now() / 1000 - (this._lastCombatT || -9)) < 4;
+      this.music.setIntensity(hot ? 2 : 1);
     } else if (this.state === 'paused') {
       this.ui.updateHUD(0);
+    }
+
+    // 旗帜飘动
+    if (this.world.flags) {
+      const tN2 = performance.now() / 1000;
+      for (const cloth of this.world.flags) {
+        const pos = cloth.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i);
+          pos.setZ(i, Math.sin(x * 3.2 + tN2 * 5.5) * 0.09 * (x / 1.6));
+        }
+        pos.needsUpdate = true;
+        cloth.geometry.computeVertexNormals();
+      }
     }
 
     // FOV：ADS

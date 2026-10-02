@@ -1,6 +1,6 @@
 // ===== 世界：地图布局、碰撞、路点网、视线 =====
 import * as THREE from '../vendor/three.module.js';
-import { MAP_HALF } from './config.js';
+import { MAP_HALF, TEAM_COLOR } from './config.js';
 
 const H = MAP_HALF; // 40
 
@@ -39,7 +39,7 @@ export class World {
     scene.add(new THREE.Mesh(skyGeo, skyMat));
 
     // 太阳
-    const sun = new THREE.DirectionalLight(0xfff2dd, 2.6);
+    const sun = new THREE.DirectionalLight(0xffe3b8, 2.9);
     sun.position.set(35, 55, 20);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -48,8 +48,43 @@ export class World {
     sun.shadow.camera.far = 160;
     sun.shadow.bias = -0.0004;
     scene.add(sun);
-    scene.add(new THREE.HemisphereLight(0xbdd9f5, 0x8a9b6c, 1.15));
+    scene.add(new THREE.HemisphereLight(0xbdd9f5, 0x8a9b6c, 1.2));
     scene.fog = new THREE.Fog(0xcfe5f4, 70, 210);
+
+    // 远山剪影（雾中层次）
+    const mountMat = new THREE.MeshBasicMaterial({ color: 0xa8c2da, fog: true });
+    for (let i = 0; i < 10; i++) {
+      const ang = (i / 10) * Math.PI * 2 + 0.35;
+      const r = 175 + Math.random() * 55;
+      const h = 26 + Math.random() * 34;
+      const m = new THREE.Mesh(new THREE.ConeGeometry(26 + Math.random() * 20, h, 5), mountMat);
+      m.position.set(Math.cos(ang) * r, h / 2 - 3, Math.sin(ang) * r);
+      m.rotation.y = Math.random() * Math.PI;
+      scene.add(m);
+    }
+
+    // 营地旗帜（顶点波动）
+    this.flags = [];
+    const mkFlag = (x, z, color) => {
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.045, 0.055, 3.4, 8),
+        new THREE.MeshStandardMaterial({ color: 0x6b6f76, roughness: 0.7 })
+      );
+      pole.position.set(x, 1.7, z);
+      pole.castShadow = true;
+      scene.add(pole);
+      const geo = new THREE.PlaneGeometry(1.6, 0.95, 10, 5);
+      geo.translate(0.8, 0, 0);
+      const cloth = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+        color, roughness: 1, side: THREE.DoubleSide,
+      }));
+      cloth.position.set(x, 3.0, z);
+      cloth.castShadow = true;
+      scene.add(cloth);
+      this.flags.push(cloth);
+    };
+    mkFlag(-35.5, -30, TEAM_COLOR.blue.main);
+    mkFlag(35.5, 30, TEAM_COLOR.red.main);
 
     // 云朵（billboard 板）
     const cloudTex = this._cloudTexture();
