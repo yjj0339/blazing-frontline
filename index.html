@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>烈日战线 · Blazing Frontline</title>
+<meta name="description" content="明亮卡通风第一人称射击：全战场 14 名 AI 士兵混战，团队死斗与个人混战两种模式。">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- 加载 -->
+<div id="loading">
+  <div class="load-title">烈日战线</div>
+  <div class="load-sub">BLAZING FRONTLINE</div>
+  <div class="load-track"><div id="load-bar"></div></div>
+  <div id="load-txt">加载资产 0/6</div>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div id="crosshair">
+    <i class="xh t"></i><i class="xh b"></i><i class="xh l"></i><i class="xh r"></i><i class="xh dot"></i>
+  </div>
+  <div id="hitmarker"><i></i><i></i></div>
+  <div id="scope-overlay" class="hidden"></div>
+  <div id="dmg-layer"></div>
+  <div id="dmg-vignette"></div>
+  <div id="dmg-dir"><i></i></div>
+
+  <div id="score-top">
+    <span class="sc sc-b" id="score-blue">0</span>
+    <span id="timer">6:00</span>
+    <span class="sc sc-r" id="score-red">0</span>
+  </div>
+  <div id="mode-tag">团队死斗</div>
+
+  <canvas id="minimap" width="176" height="176"></canvas>
+
+  <div id="killfeed"></div>
+  <div id="kill-banner"></div>
+  <div id="streak-banner"></div>
+
+  <div id="hp-wrap">
+    <div id="hp-track"><div id="hp-bar"></div></div>
+    <span id="hp-num">100</span>
+  </div>
+  <div id="ammo-wrap">
+    <div id="wname">突击步枪 AR-7</div>
+    <div id="ammo-line"><span id="ammo-mag">30</span><span id="ammo-res">/ 150</span></div>
+    <div id="grenade-line">手雷 <span id="grenade-n">×3</span></div>
+    <div id="weapon-slots">
+      <span data-k="ar">1</span><span data-k="sg">2</span><span data-k="sr">3</span><span data-k="pg">4</span>
+    </div>
+  </div>
+  <div id="respawn-tip" class="hidden"></div>
+  <div id="hint-bar">Tab 比分板 · R 换弹 · G 手雷 · C 蹲下</div>
+</div>
+
+<!-- 比分板 -->
+<div id="scoreboard" class="hidden">
+  <div id="sb-head">
+    <span id="sb-blue">0</span><span class="sb-mode">团队死斗</span><span id="sb-red">0</span>
+  </div>
+  <table>
+    <thead><tr><th>士兵</th><th>击杀</th><th>阵亡</th><th>K/D</th></tr></thead>
+    <tbody id="sb-body"></tbody>
+  </table>
+</div>
+
+<!-- 主菜单 -->
+<div id="menu">
+  <div class="menu-box">
+    <h1>烈日战线</h1>
+    <p class="menu-sub">BLAZING FRONTLINE · 全战场 14 人 AI 混战</p>
+    <div class="sec-label">选择模式</div>
+    <div id="mode-cards" class="cards"></div>
+    <div class="sec-label">敌人强度</div>
+    <div id="diff-cards" class="cards"></div>
+    <button id="btn-play" class="btn primary">▶ 开始战斗</button>
+    <div class="menu-row">
+      <button id="btn-help" class="btn ghost">玩法说明</button>
+      <button id="btn-settings" class="btn ghost">设置</button>
+    </div>
+    <div id="menu-stats"></div>
+  </div>
+</div>
+
+<!-- 玩法说明 -->
+<div id="help-panel" class="modal hidden">
+  <div class="modal-box">
+    <h2>玩法说明</h2>
+    <table class="help-t">
+      <tr><td>W A S D</td><td>移动</td></tr>
+      <tr><td>鼠标 / 右拖</td><td>视角</td></tr>
+      <tr><td>左键</td><td>开火（长按连发）</td></tr>
+      <tr><td>右键</td><td>机瞄 / 狙击开镜</td></tr>
+      <tr><td>Shift</td><td>冲刺</td></tr>
+      <tr><td>C</td><td>蹲下（更稳更小目标）</td></tr>
+      <tr><td>空格</td><td>跳跃</td></tr>
+      <tr><td>R</td><td>换弹</td></tr>
+      <tr><td>1 / 2 / 3 / 4</td><td>步枪 / 霰弹 / 狙击 / 手枪</td></tr>
+      <tr><td>滚轮 / Q</td><td>切换武器</td></tr>
+      <tr><td>G</td><td>投掷手雷</td></tr>
+      <tr><td>Tab</td><td>比分板</td></tr>
+      <tr><td>Esc</td><td>暂停</td></tr>
+    </table>
+    <p class="help-tip">小地图上只有<b>开过枪的敌人</b>会暴露红点 · 蹲下后射击更准 · 不受击 4.5 秒自动回血</p>
+    <button id="help-close" class="btn primary">知道了</button>
+  </div>
+</div>
+
+<!-- 设置 -->
+<div id="settings-panel" class="modal hidden">
+  <div class="modal-box">
+    <h2>设置</h2>
+    <label class="set-row">鼠标灵敏度 / 触屏倍率
+      <input type="range" id="set-sens" min="0.3" max="2.5" step="0.05">
+      <b id="set-sens-v">1.00</b>
+    </label>
+    <label class="set-row">视场角 FOV
+      <input type="range" id="set-fov" min="65" max="100" step="1">
+      <b id="set-fov-v">75</b>
+    </label>
+    <label class="set-row">音量
+      <input type="range" id="set-vol" min="0" max="1" step="0.05">
+    </label>
+    <label class="set-row">阴影
+      <input type="checkbox" id="set-shadow">
+    </label>
+    <label class="set-row">准星颜色
+      <input type="color" id="set-xcolor">
+    </label>
+    <button id="settings-close" class="btn primary">保存并关闭</button>
+  </div>
+</div>
+
+<!-- 暂停 -->
+<div id="pause-panel" class="modal hidden">
+  <div class="modal-box">
+    <h2>暂停</h2>
+    <button id="pause-resume" class="btn primary">继续战斗</button>
+    <button id="pause-settings" class="btn ghost">设置</button>
+    <button id="pause-quit" class="btn ghost">放弃对局</button>
+  </div>
+</div>
+
+<!-- 结算 -->
+<div id="end-panel" class="modal hidden">
+  <div class="modal-box">
+    <h2 id="end-title">胜利</h2>
+    <div id="end-score"></div>
+    <div id="end-kd"></div>
+    <div class="menu-row">
+      <button id="end-again" class="btn primary">再来一局</button>
+      <button id="end-menu" class="btn ghost">返回主菜单</button>
+    </div>
+  </div>
+</div>
+
+<!-- 移动端 -->
+<div id="touch-ui" class="hidden">
+  <div id="look-zone"></div>
+  <div id="joy-base"><div id="joy-knob"></div></div>
+  <div class="tbtns">
+    <button id="tb-fire">开火</button>
+    <button id="tb-ads">瞄准</button>
+    <button id="tb-jump">跳</button>
+    <button id="tb-crouch">蹲</button>
+    <button id="tb-reload">弹</button>
+    <button id="tb-grenade">雷</button>
+    <button id="tb-swap">枪</button>
+  </div>
+</div>
+<div id="rotate-tip" class="hidden">📱 请横屏游玩以获得最佳体验</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

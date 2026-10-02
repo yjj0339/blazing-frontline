@@ -1,0 +1,468 @@
+// ===== 对局核心：初始化/循环/命中/击杀/重生/结束 =====
+import * as THREE from '../vendor/three.module.js';
+import { GLTFLoader } from '../vendor/examples/jsm/loaders/GLTFLoader.js';
+import { MAP_HALF, WEAPONS, WEAPON_ORDER, GRENADE, PLAYER, MODES, DIFFS, TEAM_COLOR, LS_STATS } from './config.js';
+import { World } from './world.js';
+import { Player } from './player.js';
+import { Weapons } from './weapons.js';
+import { Inventory } from './weapons.js';
+import { BotManager } from './bots.js';
+import { UI } from './ui.js';
+import { AudioSys } from './audio.js';
+
+const H = MAP_HALF;
+
+export class Game {
+  constructor(assets) {
+    this.assets = assets;
+    this.state = 'menu';
+    this.mode = 'tdm';
+    this.diffKey = 'normal';
+    this.diff = DIFFS.normal;
+    this.score = { blue: 0, red: 0 };
+
+    const canvas = document.getElementById('c');
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.camera = new THREE.PerspectiveCamera(75, 1, 0.08, 400);
+    this.camera.rotation.order = 'YXZ';
+    this.scene = new THREE.Scene();
+    this.scene.add(this.camera);
+
+    this.audio = new AudioSys();
+    this.world = new World();
+    this.world.build(this.scene, assets.props);
+    this.player = new Player(this);
+    this.inv = new Inventory(this);
+    this.weapons = new Weapons(this);
+    this.weapons.buildViewModel(assets);
+    this.bots = new BotManager(this);
+
+    // 枪口灯
+    this.muzzleLight = new THREE.PointLight(0xffc266, 0, 7);
+    this.camera.add(this.muzzleLight);
+    this.muzzleLight.position.set(0.16, -0.1, -0.8);
+
+    this.input = this._makeInput();
+    this.ui = new UI(this);
+    this.ui.setupTouch();
+    this.applySettings();
+
+    this._resize();
+    window.addEventListener('resize', () => this._resize());
+    this._bindPointerLock();
+
+    this._last = performance.now();
+    this._tick = this._tick.bind(this);
+    requestAnimationFrame(this._tick);
+
+    // 测试钩子
+    const q = new URLSearchParams(location.search);
+    if (q.get('__test')) {
+      this._autoTest = { mode: q.get('mode') || 'tdm', diff: q.get('diff') || 'normal', t: parseFloat(q.get('__test')) || 0.5 };
+      window.__game = this;
+    }
+  }
+
+  allUnits() {
+    return [this.player, ...this.bots.bots];
+  }
+
+  _resize() {
+    const w = innerWidth, h = innerHeight;
+    this.renderer.setSize(w, h);
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, this.ui?.isTouch() ? 1.5 : 2));
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+
+  applySettings(stIn) {
+    const st = stIn || (this.ui ? this.ui.settings : null);
+    if (!st) return;
+    this.audio.setVolume(st.vol);
+    this.baseFov = st.fov;
+    this.renderer.shadowMap.enabled = st.shadow;
+    this.scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
+  }
+
+  // ============ 对局 ============
+  startMatch(mode, diffKey) {
+    this.audio.init(); this.audio.resume();
+    this.mode = mode;
+    this.diffKey = diffKey;
+    this.diff = DIFFS[diffKey];
+    this.score = { blue: 0, red: 0 };
+    this.timeLeft = MODES[mode].time;
+    this.over = false;
+    this.state = 'playing';
+    this.bots.spawnAll(mode);
+    // 出生
+    const sp = this.world.spawns;
+    this.player.team = 'blue';
+    this.player.kills = 0; this.player.deaths = 0; this.player.streakBest = 0;
+    this.player.shotsFired = 0; this.player.shotsHit = 0;
+    this.player.respawn(sp.blue[(Math.random() * sp.blue.length) | 0]);
+    // bot 初始站位
+    this.bots.bots.forEach((b, i) => {
+      const arr = mode === 'tdm' ? sp[b.team] : sp.ffa;
+      b.spawnAt(arr[i % arr.length].clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, (Math.random() - 0.5) * 4)));
+      b.shotAt = -9;
+    });
+    this.ui.toGame();
+    this.ui.refreshAmmo();
+    this.vm.show(this.inv.current);
+    this.ui.killBanner(mode === 'tdm' ? '团队死斗 · 消灭红队！' : '个人混战 · 你只能相信自己！', 'big');
+    if (!this.ui.isTouch() && document.body.requestPointerLock) {
+      try {
+        const r = document.getElementById('c').requestPointerLock();
+        if (r && r.catch) r.catch(() => {});
+      } catch (e) { /* 无手势时忽略 */ }
+    }
+  }
+
+  togglePause(on) {
+    if (this.state === 'playing' && on !== false) {
+      this.state = 'paused';
+      this.ui.show('pause-panel');
+      if (document.exitPointerLock) document.exitPointerLock();
+    } else if (this.state === 'paused') {
+      this.state = 'playing';
+      this.ui.hide('pause-panel');
+      if (!this.ui.isTouch()) document.getElementById('c').requestPointerLock();
+    }
+  }
+  quitMatch() {
+    this.state = 'menu';
+    this.over = true;
+    this.ui.toMenu();
+  }
+
+  // ============ 命中 ============
+  // 世界遮挡：返回 {point, t} 或 null
+  rayWorld(origin, dir, maxD) {
+    let bt = maxD, hit = null;
+    const boxHit = (min, max) => {
+      let t0 = 0, t1 = bt;
+      const o = [origin.x, origin.y, origin.z], d = [dir.x, dir.y, dir.z];
+      for (let i = 0; i < 3; i++) {
+        if (Math.abs(d[i]) < 1e-9) {
+          if (o[i] < min[i] || o[i] > max[i]) return;
+        } else {
+          let ta = (min[i] - o[i]) / d[i], tb = (max[i] - o[i]) / d[i];
+          if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+          t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+          if (t0 > t1) return;
+        }
+      }
+      if (t0 < bt && t0 > 0.001) { bt = t0; hit = t0; }
+    };
+    for (const c of this.world.colliders) {
+      boxHit([c.x1, 0, c.z1], [c.x2, c.h, c.z2]);
+    }
+    if (dir.y < -1e-6) {
+      const t = -origin.y / dir.y;
+      if (t > 0.001 && t < bt) {
+        const px = origin.x + dir.x * t, pz = origin.z + dir.z * t;
+        if (Math.abs(px) < H && Math.abs(pz) < H) hit = t;
+      }
+    }
+    if (hit === null) return null;
+    return { t: hit, point: origin.clone().addScaledVector(dir, hit) };
+  }
+
+  // 通用 hitscan（玩家武器）：世界遮挡 + 单位命中
+  fireHitscan(shooter, origin, dir, w) {
+    const maxD = w.range + 60;
+    const wall = this.rayWorld(origin, dir, maxD);
+    const wallT = wall ? wall.t : maxD;
+    let best = null;
+    for (const u of this.allUnits()) {
+      if (u === shooter || !u.alive) continue;
+      if (this.mode === 'tdm' && u.team === shooter.team) continue;
+      // 2D 射线-圆
+      const ox = origin.x - u.pos.x, oz = origin.z - u.pos.z;
+      const a = dir.x * dir.x + dir.z * dir.z;
+      if (a < 1e-8) continue;
+      const b = 2 * (ox * dir.x + oz * dir.z);
+      const c = ox * ox + oz * oz - 0.42 * 0.42;
+      const disc = b * b - 4 * a * c;
+      if (disc < 0) continue;
+      const t = (-b - Math.sqrt(disc)) / (2 * a);
+      if (t < 0.3 || t > wallT) continue;
+      const z = origin.y + dir.y * t - u.pos.y;
+      let part = 'body';
+      if (z > 1.38) part = 'head';
+      else if (z < 0.55) part = 'leg';
+      if (!best || t < best.t) best = { u, t, part };
+    }
+    if (best) {
+      const head = best.part === 'head';
+      const dmgMul = best.part === 'head' ? w.headMul : best.part === 'leg' ? 0.75 : 1;
+      const point = origin.clone().addScaledVector(dir, best.t);
+      let dmg = w.dmg * dmgMul;
+      if (shooter.isPlayer) dmg *= 1.0;
+      best.u.damage(dmg, shooter, head);
+      return { hitUnit: best.u, head, point, t: best.t };
+    }
+    return { hitUnit: null, head: false, point: wall ? wall.point : origin.clone().addScaledVector(dir, maxD), t: wallT };
+  }
+
+  explode(pos, owner) {
+    this.audio.explosion(pos, this.camera);
+    this.weapons.sparks.burst(pos, 0xffa640, 22, 9);
+    this.weapons.sparks.burst(pos, 0x6b6b6b, 14, 5);
+    // 范围伤害
+    for (const u of this.allUnits()) {
+      if (!u.alive) continue;
+      const d = u.pos.distanceTo(pos);
+      if (d > GRENADE.radius) continue;
+      const k = 1 - d / GRENADE.radius;
+      let dmg = GRENADE.dmg * (0.35 + k * 0.65);
+      if (!u.isPlayer && !(owner && owner.isPlayer)) dmg *= 0.6;
+      u.damage(dmg, owner && owner !== u ? owner : null, false);
+      if (u.isPlayer && u.alive) {
+        this.ui.vignette(0.7);
+        this.ui.damageDir(pos);
+      }
+    }
+    this.botHearShot(pos, 60);
+  }
+
+  botHearShot(pos, radius, except) {
+    for (const b of this.bots.bots) {
+      if (b === except || !b.alive) continue;
+      if (b.pos.distanceTo(pos) < radius) {
+        b.heardShotT = 3;
+        b.heardPos = pos.clone ? pos.clone() : new THREE.Vector3(pos.x, 0, pos.z);
+      }
+    }
+  }
+
+  // ============ 击杀/受伤回调 ============
+  onPlayerHurt(from, head, amount) {
+    this.ui.vignette(Math.min(0.85, 0.3 + amount / 120));
+    if (from) this.ui.damageDir(from.pos);
+    this.audio.hurt();
+  }
+
+  onUnitKilled(victim, killer, head) {
+    if (this.over) return;
+    const wName = '步枪';
+    if (killer && killer !== victim) {
+      killer.kills++;
+      killer.streak = (killer.streak || 0) + 1;
+      if (killer.streakBest === undefined) killer.streakBest = 0;
+      killer.streakBest = Math.max(killer.streakBest, killer.streak);
+      if (this.mode === 'tdm') this.score[killer.team]++;
+      else if (killer.isPlayer) this.score.blue = killer.kills;
+    }
+    victim.streak = 0;
+    this.ui.killfeed(killer, victim, head, wName);
+
+    if (killer && killer.isPlayer && victim !== killer) {
+      this.audio.kill();
+      this.ui.hitmarker(head);
+      const n = killer.streak;
+      this.ui.killBanner(head ? `爆头击杀 ${victim.name}！` : `击杀了 ${victim.name}`);
+      if (n === 2) { this.ui.streakBanner('双杀！'); this.audio.streak(2); }
+      else if (n === 3) { this.ui.streakBanner('三连杀！'); this.audio.streak(3); }
+      else if (n === 4) { this.ui.streakBanner('四连杀！火力全开！'); this.audio.streak(4); }
+      else if (n >= 5) { this.ui.streakBanner(`${n} 连杀 · 杀神降临！`); this.audio.streak(5); }
+    }
+
+    if (victim.isPlayer) {
+      victim.respawnT = 4;
+      this.audio.lose && null;
+    } else {
+      victim.respawnT = 4;
+    }
+    // 胜负
+    const lim = MODES[this.mode].scoreLimit;
+    if ((this.mode === 'tdm' && (this.score.blue >= lim || this.score.red >= lim)) ||
+        (this.mode === 'ffa' && this.score.blue >= lim)) {
+      this.endMatch();
+    }
+  }
+
+  _respawnUnits(dt) {
+    // 玩家
+    const p = this.player;
+    if (!p.alive) {
+      p.respawnT -= dt;
+      if (p.respawnT <= 0) {
+        const arr = this.mode === 'tdm' ? this.world.spawns.blue : this.world.spawns.ffa;
+        p.respawn(arr[(Math.random() * arr.length) | 0].clone());
+        this.audio.respawn();
+      }
+    }
+    for (const b of this.bots.bots) {
+      if (b.alive) continue;
+      b.respawnT -= dt;
+      if (b.respawnT <= 0) {
+        const arr = this.mode === 'tdm' ? this.world.spawns[b.team] : this.world.spawns.ffa;
+        let pt = arr[(Math.random() * arr.length) | 0].clone();
+        // 远离敌人
+        for (let tries = 0; tries < 6; tries++) {
+          let mind = Infinity;
+          for (const u of this.allUnits()) {
+            if (u === b || !u.alive) continue;
+            if (this.mode === 'tdm' && u.team === b.team) continue;
+            mind = Math.min(mind, u.pos.distanceTo(pt));
+          }
+          if (mind > 16) break;
+          pt = arr[(Math.random() * arr.length) | 0].clone();
+        }
+        b.spawnAt(pt);
+      }
+    }
+  }
+
+  endMatch() {
+    this.over = true;
+    this.state = 'ended';
+    const p = this.player;
+    let win;
+    if (this.mode === 'tdm') win = this.score.blue > this.score.red;
+    else {
+      let top = p.kills;
+      for (const b of this.bots.bots) top = Math.max(top, b.kills);
+      win = p.kills >= top && p.kills >= MODES.ffa.scoreLimit;
+    }
+    // 战绩
+    const s = this.ui.stats;
+    s.matches++; if (win) s.wins++;
+    s.kills += p.kills; s.deaths += p.deaths;
+    s.bestStreak = Math.max(s.bestStreak || 0, p.streakBest || 0);
+    this.ui.saveStats();
+    if (win) this.audio.win(); else this.audio.lose();
+    if (document.exitPointerLock) document.exitPointerLock();
+    setTimeout(() => this.ui.showEnd(win), 900);
+  }
+
+  // ============ 输入 ============
+  _makeInput() {
+    const inp = {
+      moveX: 0, moveY: 0, jump: false, crouch: false, sprint: false,
+      firing: false, ads: false, reload: false, grenade: false,
+      switchTo: null, cycle: 0, lookDX: 0, lookDY: 0,
+    };
+    const keys = {};
+    const syncMove = () => {
+      inp.moveX = (keys['KeyD'] ? 1 : 0) - (keys['KeyA'] ? 1 : 0);
+      inp.moveY = (keys['KeyW'] ? 1 : 0) - (keys['KeyS'] ? 1 : 0);
+      inp.sprint = !!keys['ShiftLeft'];
+      inp.crouch = !!keys['KeyC'] || !!keys['ControlLeft'];
+    };
+    window.addEventListener('keydown', (e) => {
+      if (this.state !== 'playing' && e.code !== 'Tab' && e.code !== 'Escape') return;
+      if (['Tab', 'Space'].includes(e.code)) e.preventDefault();
+      keys[e.code] = true;
+      if (e.code === 'Space') inp.jump = true;
+      if (e.code === 'KeyR') inp.reload = true;
+      if (e.code === 'KeyG') inp.grenade = true;
+      if (e.code === 'Digit1') inp.switchTo = 'ar';
+      if (e.code === 'Digit2') inp.switchTo = 'sg';
+      if (e.code === 'Digit3') inp.switchTo = 'sr';
+      if (e.code === 'Digit4') inp.switchTo = 'pg';
+      if (e.code === 'KeyQ') inp.cycle = -1;
+      if (e.code === 'Escape' && this.state === 'playing') this.togglePause(true);
+      syncMove();
+    });
+    window.addEventListener('keyup', (e) => {
+      keys[e.code] = false;
+      syncMove();
+    });
+    const canvas = document.getElementById('c');
+    canvas.addEventListener('mousedown', (e) => {
+      if (this.state === 'playing' && document.pointerLockElement !== canvas) {
+        try {
+          const r = canvas.requestPointerLock();
+          if (r && r.catch) r.catch(() => {});
+        } catch (err) { }
+        return;
+      }
+      if (e.button === 0) inp.firing = true;
+      if (e.button === 2) inp.ads = true;
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) inp.firing = false;
+      if (e.button === 2) inp.ads = false;
+    });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement !== canvas || this.state !== 'playing') return;
+      const k = 0.0021 * this.ui.settings.sens * (inp.ads ? 0.6 : 1);
+      inp.lookDX -= e.movementX * k;
+      inp.lookDY -= e.movementY * k;
+    });
+    window.addEventListener('wheel', (e) => {
+      if (this.state === 'playing') inp.cycle = e.deltaY > 0 ? 1 : -1;
+    }, { passive: true });
+    // Tab 比分板
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Tab' && (this.state === 'playing' || this.state === 'paused')) {
+        this.ui.fillScoreboard();
+        this.ui.show('scoreboard');
+      }
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'Tab') this.ui.hide('scoreboard');
+    });
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement !== canvas && this.state === 'playing' && !this.ui.isTouch()) {
+        this.togglePause(true);
+      }
+    });
+    return inp;
+  }
+
+  _bindPointerLock() { /* 已并入 _makeInput */ }
+
+  _consumeLook() {
+    const inp = this.input;
+    const p = this.player;
+    p.yaw += inp.lookDX;
+    p.pitch += inp.lookDY;
+    p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch));
+    inp.lookDX = 0; inp.lookDY = 0;
+  }
+
+  // ============ 主循环 ============
+  _tick(now) {
+    requestAnimationFrame(this._tick);
+    let dt = Math.min(0.05, (now - this._last) / 1000);
+    this._last = now;
+
+    if (this._autoTest) {
+      this._autoTest.t -= dt;
+      if (this._autoTest.t <= 0 && this.state === 'menu') {
+        this.startMatch(this._autoTest.mode, this._autoTest.diff);
+      }
+    }
+
+    if (this.state === 'playing' && !this.over) {
+      this._consumeLook();
+      this.player.update(dt, this.input);
+      this.weapons.update(dt, this.input);
+      this.input.jump = false;
+      this.bots.update(dt);
+      this._respawnUnits(dt);
+      this.timeLeft -= dt;
+      if (this.timeLeft <= 0) this.endMatch();
+      this.ui.updateHUD(dt);
+    } else if (this.state === 'paused') {
+      this.ui.updateHUD(0);
+    }
+
+    // FOV：ADS
+    const w = this.inv.w;
+    const targetFov = this.baseFov + (w.adsFov - this.baseFov) * this.player.adsT;
+    if (Math.abs(this.camera.fov - targetFov) > 0.1) {
+      this.camera.fov += (targetFov - this.camera.fov) * 0.25;
+      this.camera.updateProjectionMatrix();
+    }
+    this.renderer.render(this.scene, this.camera);
+  }
+}
