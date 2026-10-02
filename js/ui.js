@@ -1,8 +1,9 @@
 // ===== 全部界面：HUD/菜单/结算/小地图/移动端 =====
 import * as THREE from '../vendor/three.module.js';
-import { MODES, DIFFS, WEAPONS, LS_SETTINGS, LS_STATS, TEAM_COLOR, REWARDS, RANKS, xpForLevel, levelOf } from './config.js';
+import { MODES, DIFFS, WEAPONS, LS_SETTINGS, LS_STATS, TEAM_COLOR, REWARDS, RANKS, xpForLevel, levelOf, MAPS, WEAPON_ORDER } from './config.js';
 
 const $ = (id) => document.getElementById(id);
+const LS_MASTERY = 'bf_mastery_v1';
 
 export class UI {
   constructor(game) {
@@ -26,6 +27,11 @@ export class UI {
     const def = { matches: 0, wins: 0, kills: 0, deaths: 0, bestStreak: 0, xp: 0 };
     try { return { ...def, ...JSON.parse(localStorage.getItem(LS_STATS) || '{}') }; } catch { return def; }
   }
+  loadMastery() {
+    const def = { ar: 0, sg: 0, sr: 0, pg: 0 };
+    try { return { ...def, ...JSON.parse(localStorage.getItem(LS_MASTERY) || '{}') }; } catch { return def; }
+  }
+  saveMastery(m) { localStorage.setItem(LS_MASTERY, JSON.stringify(m)); }
   saveStats() { localStorage.setItem(LS_STATS, JSON.stringify(this.stats)); }
 
   // ---------- 屏幕切换 ----------
@@ -75,11 +81,29 @@ export class UI {
       };
       diffWrap.appendChild(div);
     }
+    // 地图卡
+    const mapWrap = $('map-cards');
+    for (const [k, m] of Object.entries(MAPS)) {
+      const div = document.createElement('div');
+      div.className = 'card map-card' + ((this.settings.map || 'town') === k ? ' sel' : '');
+      div.innerHTML = `<b>${m.name}</b><span>${m.desc}</span>`;
+      div.onclick = () => {
+        this.settings.map = k;
+        [...mapWrap.children].forEach((c) => c.classList.remove('sel'));
+        div.classList.add('sel');
+        this.game.audio.uiClick();
+        this.saveSettings();
+        this.game.changeMap(k);
+      };
+      mapWrap.appendChild(div);
+    }
     $('btn-play').onclick = () => { this.game.audio.uiClick(); this.game.startMatch(this.mode, this.diff); };
     $('btn-help').onclick = () => { this.game.audio.uiClick(); this.show('help-panel'); };
     $('help-close').onclick = () => this.hide('help-panel');
     $('btn-settings').onclick = () => { this.game.audio.uiClick(); this.show('settings-panel'); };
     $('settings-close').onclick = () => { this.saveSettings(); this.hide('settings-panel'); };
+    $('btn-armory').onclick = () => { this.game.audio.uiClick(); this.showArmory(); this.show('armory-panel'); };
+    $('armory-close').onclick = () => this.hide('armory-panel');
     $('pause-resume').onclick = () => this.game.togglePause(false);
     $('pause-settings').onclick = () => { this.show('settings-panel'); };
     $('pause-quit').onclick = () => this.game.quitMatch();
@@ -106,6 +130,26 @@ export class UI {
   }
 
   // 连击大字
+  showArmory() {
+    const g = this.game;
+    const wrap = $('armory-cards');
+    wrap.innerHTML = '';
+    for (const k of WEAPON_ORDER) {
+      const w = WEAPONS[k];
+      const xp = g.mastery[k] || 0;
+      const lv = g.masteryOf(k);
+      const cur = (lv - 1) * 100, next = lv * 100;
+      const pct = Math.min(100, Math.round((xp - cur) / (next - cur) * 100));
+      const div = document.createElement('div');
+      div.className = 'arm-card';
+      div.innerHTML = `
+        <div class="arm-head"><b>${w.name}</b><span class="arm-lv">Lv.${lv}</span></div>
+        <div class="arm-track"><div style="width:${pct}%"></div></div>
+        <div class="arm-bonus">${xp} XP · 换弹 ${Math.round((1 - (1 - 0.02 * (lv - 1))) * 100)}%更快 · 精度 +${Math.round((1 - (1 - 0.015 * (lv - 1))) * 100)}%</div>`;
+      wrap.appendChild(div);
+    }
+  }
+
   showCombo(n) {
     if (n < 2) return;
     const el = $('combo-banner');
@@ -122,18 +166,19 @@ export class UI {
 
   bindSettings() {
     const st = this.settings;
-    st.sens ??= 1.0; st.fov ??= 75; st.vol ??= 0.8; st.shadow ??= true; st.xcolor ??= '#7fe07f';
-    const sens = $('set-sens'), fov = $('set-fov'), vol = $('set-vol'), shadow = $('set-shadow'), xc = $('set-xcolor');
-    sens.value = st.sens; fov.value = st.fov; vol.value = st.vol; shadow.checked = st.shadow; xc.value = st.xcolor;
+    st.sens ??= 1.0; st.fov ??= 75; st.vol ??= 0.8; st.shadow ??= true; st.xcolor ??= '#7fe07f'; st.music ??= true; st.map ??= 'town';
+    const sens = $('set-sens'), fov = $('set-fov'), vol = $('set-vol'), shadow = $('set-shadow'), xc = $('set-xcolor'), music = $('set-music');
+    sens.value = st.sens; fov.value = st.fov; vol.value = st.vol; shadow.checked = st.shadow; xc.value = st.xcolor; music.checked = st.music;
     const upd = () => {
       st.sens = parseFloat(sens.value); st.fov = parseFloat(fov.value);
       st.vol = parseFloat(vol.value); st.shadow = shadow.checked; st.xcolor = xc.value;
+      st.music = music.checked;
       $('set-sens-v').textContent = st.sens.toFixed(2);
       $('set-fov-v').textContent = st.fov;
       this.game.applySettings(st);
       this.saveSettings();
     };
-    sens.oninput = upd; fov.oninput = upd; vol.oninput = upd; shadow.onchange = upd; xc.oninput = upd;
+    sens.oninput = upd; fov.oninput = upd; vol.oninput = upd; shadow.onchange = upd; xc.oninput = upd; music.onchange = upd;
     upd();
   }
 
@@ -460,6 +505,9 @@ export class UI {
     $('end-kd').innerHTML = `击杀 <b>${p.kills}</b> · 阵亡 <b>${p.deaths}</b> · 连杀 <b>${p.streakBest || 0}</b> · 命中率 <b>${acc}%</b>`;
     const lv = levelOf(this.stats.xp || 0);
     $('end-xp').innerHTML = `<span class="xp-gain">+${g.xpGained || 0} XP</span> · 当前军衔 <b>Lv.${lv} ${RANKS[lv - 1]}</b>`;
+    const mparts = WEAPON_ORDER.filter((k) => g.sessionMastery[k] > 0)
+      .map((k) => `${WEAPONS[k].name.split(' ')[0]} +${g.sessionMastery[k]}`);
+    $('end-mastery').innerHTML = mparts.length ? `武器熟练度：${mparts.join(' · ')}` : '';
     this.show('end-panel');
   }
 

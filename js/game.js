@@ -40,8 +40,11 @@ export class Game {
 
     this.audio = new AudioSys();
     this.music = new MusicSys(this.audio);
+    this.ui = new UI(this);
+    this.ui.setupTouch();
+    this.applySettings();
     this.world = new World();
-    this.world.build(this.scene, assets.props);
+    this.world.build(this.scene, assets.props, this.ui.settings.map || 'town');
     this.player = new Player(this);
     this.inv = new Inventory(this);
     this.weapons = new Weapons(this);
@@ -54,9 +57,6 @@ export class Game {
     this.muzzleLight.position.set(0.16, -0.1, -0.8);
 
     this.input = this._makeInput();
-    this.ui = new UI(this);
-    this.ui.setupTouch();
-    this.applySettings();
     this.trauma = 0;
     this.uavT = 0;
     this.pendingStrikes = [];
@@ -69,6 +69,9 @@ export class Game {
     this.combo = 0;
     this.comboT = 0;
     this.menuAng = 0;
+    // 武器熟练度（跨局持久）
+    this.mastery = this.ui.loadMastery();
+    this.sessionMastery = { ar: 0, sg: 0, sr: 0, pg: 0 };
     this.scorchPool = [];
     for (let i = 0; i < 10; i++) {
       const m = new THREE.Mesh(
@@ -94,12 +97,7 @@ export class Game {
     requestAnimationFrame(this._tick);
 
     // 菜单背景：先摆一队 bot 在场上巡逻
-    this.bots.spawnAll('tdm');
-    const sp0 = this.world.spawns;
-    this.bots.bots.forEach((b, i) => {
-      const arr = b.team === 'blue' ? sp0.blue : sp0.red;
-      b.spawnAt(arr[i % arr.length].clone().add(new THREE.Vector3((Math.random() - 0.5) * 5, 0, (Math.random() - 0.5) * 5)));
-    });
+    this.redeployMenuBots();
     // 首次交互解锁音频（浏览器策略）
     window.addEventListener('pointerdown', () => {
       this.audio.init(); this.audio.resume(); this.music.start();
@@ -131,15 +129,19 @@ export class Game {
     this.audio.setVolume(st.vol);
     this.baseFov = st.fov;
     this.renderer.shadowMap.enabled = st.shadow;
+    if (this.music && this.music.gain) this.music.gain.gain.value = st.music ? 0.55 : 0;
     this.scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
   }
 
   // ============ 对局 ============
   startMatch(mode, diffKey) {
-    this.audio.init(); this.audio.resume();
+    this.audio.init(); this.audio.resume(); this.music.start();
     this.mode = mode;
     this.diffKey = diffKey;
     this.diff = DIFFS[diffKey];
+    // 地图
+    const mapId = this.ui.settings.map || 'town';
+    if (this.world.mapId !== mapId) this.world.build(this.scene, this.assets.props, mapId);
     this.score = { blue: 0, red: 0 };
     this.timeLeft = MODES[mode].time;
     this.over = false;
@@ -201,6 +203,40 @@ export class Game {
     this.state = 'menu';
     this.over = true;
     this.ui.toMenu();
+  }
+
+  addMastery(kind, n) {
+    if (!this.mastery[kind]) this.mastery[kind] = 0;
+    const lv0 = Math.min(10, Math.floor(this.mastery[kind] / 100) + 1);
+    this.mastery[kind] += n;
+    this.sessionMastery[kind] = (this.sessionMastery[kind] || 0) + n;
+    const lv1 = Math.min(10, Math.floor(this.mastery[kind] / 100) + 1);
+    if (lv1 > lv0) {
+      this.ui.streakBanner(`${WEAPONS[kind].name} 熟练度 Lv.${lv1}！`);
+      this.audio.streak(2);
+    }
+    this.ui.saveMastery(this.mastery);
+  }
+  masteryOf(kind) {
+    return Math.min(10, Math.floor((this.mastery[kind] || 0) / 100) + 1);
+  }
+  masteryBonus(kind) {
+    const lv = this.masteryOf(kind);
+    return { reload: 1 - 0.02 * (lv - 1), spread: 1 - 0.015 * (lv - 1), lv };
+  }
+
+  // 菜单切图：重建战场 + 重摆背景 bot
+  changeMap(mapId) {
+    this.world.build(this.scene, this.assets.props, mapId);
+    if (this.state === 'menu') this.redeployMenuBots();
+  }
+  redeployMenuBots() {
+    this.bots.spawnAll('tdm');
+    const sp = this.world.spawns;
+    this.bots.bots.forEach((b, i) => {
+      const arr = b.team === 'blue' ? sp.blue : sp.red;
+      b.spawnAt(arr[i % arr.length].clone().add(new THREE.Vector3((Math.random() - 0.5) * 5, 0, (Math.random() - 0.5) * 5)));
+    });
   }
 
   addTrauma(k) {
@@ -481,7 +517,8 @@ export class Game {
     this.ui.killfeed(killer, victim, head, wName);
 
     if (killer && killer.isPlayer && victim !== killer) {
-      // 击杀奖励：回血 + 连击 + hitstop + 连杀解锁
+      // 击杀奖励：回血 + 连击 + hitstop + 连杀解锁 + 熟练度
+      this.addMastery(this.inv.current, 20);
       killer.hp = Math.min(PLAYER.hp, killer.hp + PLAYER.killHeal);
       this.ui.spawnHeal(PLAYER.killHeal);
       this.hitstopT = 0.085;

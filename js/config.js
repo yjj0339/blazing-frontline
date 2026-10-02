@@ -89,6 +89,22 @@ export const MAT_SOUND = {
   crate: 'wood', tower: 'wood', fence: 'wood', sandbag: 'sand', pallet: 'wood',
 };
 
+// 地图定义
+export const MAPS = {
+  town: {
+    id: 'town', name: '烈日镇', desc: '正午强光 · 草地与集装箱战场',
+    ground: 'grass', skyTop: 0x3f8fd2, skyBot: 0xd8ecf9, fog: 0xcfe5f4,
+    sunColor: 0xffe3b8, sunI: 2.9, sunPos: [35, 55, 20], hemiGround: 0x8a9b6c,
+    cloud: 9, spawns: 'diag',
+  },
+  gobi: {
+    id: 'gobi', name: '戈壁小镇', desc: '斜阳长影 · 沙色巷道与断墙',
+    ground: 'desert', skyTop: 0x6fa8cf, skyBot: 0xf3ddb8, fog: 0xefd9b6,
+    sunColor: 0xffd9a0, sunI: 2.6, sunPos: [42, 30, 16], hemiGround: 0xb59a6e,
+    cloud: 3, spawns: 'side',
+  },
+};
+
 export const TEAM_COLOR = {
   blue: { main: 0x2f7fd4, dark: 0x1f4d7d, ui: '#2f7fd4', light: '#8fc4f0' },
   red:  { main: 0xd0452f, dark: 0x7d2a1c, ui: '#d0452f', light: '#f0a08c' },

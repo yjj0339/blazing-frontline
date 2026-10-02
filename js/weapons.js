@@ -314,7 +314,8 @@ export class Inventory {
   startReload() {
     const w = this.w, st = this.st;
     if (this.reloadT > 0 || st.mag >= w.mag || st.reserve <= 0 || this.swapT > 0) return;
-    this.reloadT = w.reload;
+    const bonus = this.game.masteryBonus(this.current);
+    this.reloadT = w.reload * bonus.reload;
     this.game.audio.reload(this.current);
   }
   update(dt, wantFire) {
@@ -431,8 +432,9 @@ export class Weapons {
     g.audio.shoot(w.id, null, null);
     // 扩散
     const moveK = Math.min(1, p.moveSpeed / 5);
-    let spread = (w.spreadStand + w.spreadMove * moveK) * (1 - p.adsT);
-    spread += w.spreadAds * p.adsT;
+    const mBonus = g.masteryBonus(inv.current).spread;
+    let spread = (w.spreadStand + w.spreadMove * moveK) * (1 - p.adsT) * mBonus;
+    spread += w.spreadAds * p.adsT * mBonus;
     if (!p.grounded) spread += w.spreadJump;
     if (p.crouching) spread *= 0.7;
     const spreadRad = spread * Math.PI / 180;
@@ -458,6 +460,7 @@ export class Weapons {
     }
     if (anyHit) {
       p.shotsHit++;
+      g.addMastery(inv.current, 1);
       g.ui.hitmarker(anyHead);
       g.audio.hit(anyHead);
     }
