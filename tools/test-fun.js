@@ -4,6 +4,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (c, n) => console.log((c ? '✓' : '✗') + ' ' + n);
+const URLBASE = 'http://localhost:8129/';
 
 (async () => {
   const srv = spawn('node', [path.join(__dirname, 'server.js'), '8129'], { stdio: 'pipe' });
@@ -77,7 +78,38 @@ const ok = (c, n) => console.log((c ? '✓' : '✗') + ' ' + n);
   }));
   ok(dom.rw && dom.bubble, '奖励条与气泡层就位');
 
-  await page.screenshot({ path: path.join(__dirname, '..', 'shots', 'test_v09.png') });
+  // 6. 油桶：3 发引爆
+  const barrel = await page.evaluate(() => {
+    const g = window.__game;
+    const rec = g.world.barrels.find((b) => !b.dead);
+    if (!rec) return { ok: false };
+    const n0 = g.world.barrels.filter((b) => !b.dead).length;
+    g.damageBarrel(rec, 999, g.player);
+    const n1 = g.world.barrels.filter((b) => !b.dead).length;
+    return { ok: n1 === n0 - 1, gone: rec.dead, colliderGone: !g.world.colliders.some((c) => c.barrel === rec) };
+  });
+  ok(barrel.ok && barrel.gone && barrel.colliderGone, '油桶引爆并移除碰撞');
+
+  // 7. 据点争夺：蓝队进圈占领得分
+  await page.goto(URLBASE + '?__test=0.5&mode=koth&diff=easy', { waitUntil: 'networkidle' });
+  await wait(3000);
+  const koth = await page.evaluate(() => {
+    const g = window.__game;
+    if (g.mode !== 'koth') return { ok: false };
+    // 清空圈附近的红队，放一个蓝 bot 进圈；关视觉+站桩彻底冻结
+    for (const b of g.bots.bots) {
+      b.state = 'roam'; b.observeT = 999; b.roamPt = null; b.path = null; b.target = null;
+      b.visionK = 0.01; b.heardShotT = 0; b.lastSeen = null; b.burstLeft = 0;
+      if (b.team === 'red') b.pos.set(26, 0, 26);
+      else b.pos.set(1.5, 0, 1.5);
+    }
+    return new Promise((res) => setTimeout(() => res({
+      ok: true, blue: g.score.blue, owner: g.point.owner,
+    }), 8000));
+  });
+  ok(koth.ok && koth.owner === 'blue' && koth.blue > 0, `据点占领得分（蓝 ${koth.blue} 分 owner=${koth.owner}）`);
+
+  await page.screenshot({ path: path.join(__dirname, '..', 'shots', 'test_v12.png') });
   console.log('errors:', errs.length ? errs.slice(0, 4) : 'none');
   await browser.close();
   srv.kill();

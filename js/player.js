@@ -177,12 +177,25 @@ export class Player {
     this.recoilPitch *= Math.max(0, 1 - dt * 9);
     this.recoilYaw *= Math.max(0, 1 - dt * 9);
 
-    // ---- 相机（含屏震）----
+    // ---- 相机（含屏震 + 狙击呼吸）----
     const cam = g.camera;
     const tr = (g.trauma || 0) ** 2;
     const tN = performance.now() / 1000;
     const shX = tr * 0.04 * Math.sin(tN * 67.3);
     const shY = tr * 0.04 * Math.cos(tN * 55.7);
+    // 狙击开镜呼吸晃动：按住 Shift 屏息 4 秒，憋爆后剧烈喘
+    let swayYaw = 0, swayPitch = 0;
+    const scopeOn = inp.ads && this.adsT > 0.85 && this.weapon.scope;
+    if (scopeOn) {
+      if (inp.sprint) this.breath = Math.min(4, this.breath + dt);
+      else this.breath = Math.max(0, this.breath - dt * 1.5);
+      const holding = inp.sprint && this.breath > 0 && this.breath < 4;
+      this.swayP = (this.swayP || 0) + dt * (holding ? 1.1 : 2.3);
+      let amp = holding ? 0.0005 : 0.0028;
+      if (this.breath >= 4) amp = 0.007;
+      swayYaw = Math.sin(this.swayP) * amp + Math.sin(this.swayP * 1.9) * amp * 0.6;
+      swayPitch = Math.cos(this.swayP * 1.4) * amp * 0.7;
+    } else this.breath = 0;
     const bobA = this.adsT > 0.5 ? 0.012 : 0.03;
     const bobY = Math.abs(Math.sin(this.bobPhase * 2)) * bobA * Math.min(1, this.moveSpeed / 4);
     const bobX = Math.sin(this.bobPhase) * bobA * Math.min(1, this.moveSpeed / 4);
@@ -191,7 +204,11 @@ export class Player {
       this.pos.y + this.eyeY - bobY - this.landK * 0.14 + shY,
       this.pos.z - bobX * Math.sin(this.yaw)
     );
-    cam.rotation.set(this.pitch + this.recoilPitch, this.yaw + this.recoilYaw, Math.sin(this.bobPhase) * 0.006 + tr * 0.02 * Math.sin(tN * 71), 'YXZ');
+    cam.rotation.set(
+      this.pitch + this.recoilPitch + swayPitch,
+      this.yaw + this.recoilYaw + swayYaw,
+      Math.sin(this.bobPhase) * 0.006 + tr * 0.02 * Math.sin(tN * 71), 'YXZ'
+    );
   }
 
   addRecoil(r) {

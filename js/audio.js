@@ -177,6 +177,51 @@ export class AudioSys {
     src.start(); lfo.start();
   }
 
+  // 子弹擦身嗖声
+  whiz(pos, cam) {
+    if (!this.ctx) return;
+    let pan = 0;
+    if (pos && cam) {
+      const yaw = cam.rotation.y || 0;
+      const rx = Math.cos(yaw), rz = -Math.sin(yaw);
+      const dx = pos.x - cam.position.x, dz = pos.z - cam.position.z;
+      const l = Math.hypot(dx, dz) || 1;
+      pan = Math.max(-1, Math.min(1, (dx * rx + dz * rz) / l));
+    }
+    const t = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'bandpass'; f.Q.value = 7;
+    f.frequency.setValueAtTime(6800, t);
+    f.frequency.exponentialRampToValueAtTime(1300, t + 0.11);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.linearRampToValueAtTime(0.4, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    const p = this.ctx.createStereoPanner();
+    p.pan.value = pan;
+    src.connect(f).connect(g).connect(p).connect(this.master);
+    src.start(t); src.stop(t + 0.16);
+  }
+  // 命中材质音
+  impact(mat, pos, cam) {
+    if (!this.ctx) return;
+    const s = this._spatial(pos, cam, 0.1);
+    if (s.gain < 0.04) return;
+    const k = Math.min(1.6, s.gain * 4);
+    if (mat === 'metal') {
+      this._tone(1900 + Math.random() * 700, 0.08, { type: 'square', gain: 0.09 * k, pan: s.pan });
+      this._noise(0.045, { freq: 3800, gain: 0.07 * k, pan: s.pan });
+    } else if (mat === 'wood') {
+      this._noise(0.07, { freq: 850, q: 1.4, gain: 0.15 * k, pan: s.pan });
+    } else if (mat === 'sand') {
+      this._noise(0.05, { freq: 420, gain: 0.14 * k, type: 'lowpass', pan: s.pan });
+    } else {
+      this._noise(0.06, { freq: 600, gain: 0.14 * k, type: 'lowpass', pan: s.pan });
+      this._tone(320, 0.05, { type: 'triangle', gain: 0.07 * k, pan: s.pan });
+    }
+  }
   // ---------- 低血心跳 ----------
   _heartTimer = 0;
   heartbeatTick(dt, hp) {

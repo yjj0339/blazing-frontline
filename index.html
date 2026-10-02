@@ -41,6 +41,11 @@
     <span class="sc sc-r" id="score-red">0</span>
   </div>
   <div id="mode-tag">团队死斗</div>
+  <div id="point-hud" class="hidden">
+    <span class="pt-letter">A</span>
+    <div class="pt-track"><div id="pt-fill"></div></div>
+    <span id="pt-owner">—</span>
+  </div>
   <div id="reward-bar">
     <span id="rw-uav" title="侦察机">🔍<i id="rw-uav-t">3杀</i></span>
     <span id="rw-strike" title="空袭">💥<i id="rw-strike-t">6杀</i></span>
@@ -117,12 +122,13 @@
       <tr><td>1 / 2 / 3 / 4</td><td>步枪 / 霰弹 / 狙击 / 手枪</td></tr>
       <tr><td>5 / 6</td><td>侦察机 / 空袭（连杀解锁）</td></tr>
       <tr><td>X</td><td>切换射击模式 / 狙击倍镜档位</td></tr>
+      <tr><td>开镜时按 Shift</td><td>屏息（狙击镜稳定 4 秒）</td></tr>
       <tr><td>滚轮 / Q</td><td>切换武器</td></tr>
       <tr><td>G</td><td>投掷手雷</td></tr>
       <tr><td>Tab</td><td>比分板</td></tr>
       <tr><td>Esc</td><td>暂停</td></tr>
     </table>
-    <p class="help-tip">连杀 3 / 6 / 9 解锁侦察机、空袭、狂暴 · 击杀回血 25 · 冲刺中按 C 滑铲 · 不受击 3.2 秒自动回血</p>
+    <p class="help-tip">连杀 3 / 6 / 9 解锁侦察机、空袭、狂暴 · 击杀回血 25 · 油桶 3 发打爆会连锁 · 狙击开镜按住 Shift 屏息 · 冲刺中按 C 滑铲</p>
     <button id="help-close" class="btn primary">知道了</button>
   </div>
 </div>
@@ -188,6 +194,7 @@
     <button id="tb-reload">弹</button>
     <button id="tb-grenade">雷</button>
     <button id="tb-swap">枪</button>
+    <button id="tb-mode">X</button>
     <button id="tb-uav">🔍</button>
     <button id="tb-strike">💥</button>
   </div>

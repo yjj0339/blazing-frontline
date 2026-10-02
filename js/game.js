@@ -1,7 +1,7 @@
 // ===== 对局核心：初始化/循环/命中/击杀/重生/结束 =====
 import * as THREE from '../vendor/three.module.js';
 import { GLTFLoader } from '../vendor/examples/jsm/loaders/GLTFLoader.js';
-import { MAP_HALF, WEAPONS, WEAPON_ORDER, GRENADE, PLAYER, MODES, DIFFS, TEAM_COLOR, LS_STATS, REWARDS } from './config.js';
+import { MAP_HALF, WEAPONS, WEAPON_ORDER, GRENADE, PLAYER, MODES, DIFFS, TEAM_COLOR, LS_STATS, REWARDS, KOTH, MAT_SOUND } from './config.js';
 import { World } from './world.js';
 import { Player } from './player.js';
 import { Weapons } from './weapons.js';
@@ -61,6 +61,9 @@ export class Game {
     this.uavT = 0;
     this.pendingStrikes = [];
     this.rewards = { uav: false, strike: false, rampageT: 0 };
+    this.point = { owner: null, prog: 0, progTeam: null };
+    this.pointT = 0;
+    this.pointHold = 0;
     this._lastSay = -9;
     this.hitstopT = 0;
     this.combo = 0;
@@ -154,7 +157,7 @@ export class Game {
     this.player.respawn(sp.blue[(Math.random() * sp.blue.length) | 0]);
     // bot 初始站位
     this.bots.bots.forEach((b, i) => {
-      const arr = mode === 'tdm' ? sp[b.team] : sp.ffa;
+      const arr = mode === 'ffa' ? sp.ffa : sp[b.team];
       b.spawnAt(arr[i % arr.length].clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, (Math.random() - 0.5) * 4)));
       b.shotAt = -9;
     });
@@ -255,10 +258,10 @@ export class Game {
   }
 
   // ============ 命中 ============
-  // 世界遮挡：返回 {point, t} 或 null
+  // 世界遮挡：返回 {point, t, collider} 或 null
   rayWorld(origin, dir, maxD) {
-    let bt = maxD, hit = null;
-    const boxHit = (min, max) => {
+    let bt = maxD, hit = null, hitC = null;
+    const boxHit = (min, max, c) => {
       let t0 = 0, t1 = bt;
       const o = [origin.x, origin.y, origin.z], d = [dir.x, dir.y, dir.z];
       for (let i = 0; i < 3; i++) {
@@ -271,20 +274,21 @@ export class Game {
           if (t0 > t1) return;
         }
       }
-      if (t0 < bt && t0 > 0.001) { bt = t0; hit = t0; }
+      if (t0 < bt && t0 > 0.001) { bt = t0; hit = t0; hitC = c; }
     };
     for (const c of this.world.colliders) {
-      boxHit([c.x1, 0, c.z1], [c.x2, c.h, c.z2]);
+      if (c.dead) continue;
+      boxHit([c.x1, 0, c.z1], [c.x2, c.h, c.z2], c);
     }
     if (dir.y < -1e-6) {
       const t = -origin.y / dir.y;
       if (t > 0.001 && t < bt) {
         const px = origin.x + dir.x * t, pz = origin.z + dir.z * t;
-        if (Math.abs(px) < H && Math.abs(pz) < H) hit = t;
+        if (Math.abs(px) < H && Math.abs(pz) < H) { hit = t; hitC = null; }
       }
     }
     if (hit === null) return null;
-    return { t: hit, point: origin.clone().addScaledVector(dir, hit) };
+    return { t: hit, point: origin.clone().addScaledVector(dir, hit), collider: hitC };
   }
 
   // 通用 hitscan（玩家武器）：世界遮挡 + 单位命中
@@ -317,11 +321,80 @@ export class Game {
       const dmgMul = best.part === 'head' ? w.headMul : best.part === 'leg' ? 0.75 : 1;
       const point = origin.clone().addScaledVector(dir, best.t);
       let dmg = w.dmg * dmgMul;
-      if (shooter.isPlayer) dmg *= 1.0;
       best.u.damage(dmg, shooter, head);
       return { hitUnit: best.u, head, point, t: best.t };
     }
-    return { hitUnit: null, head: false, point: wall ? wall.point : origin.clone().addScaledVector(dir, maxD), t: wallT };
+    if (wall && wall.collider && wall.collider.barrel && !wall.collider.barrel.dead) {
+      this.damageBarrel(wall.collider.barrel, w.dmg * (w.pellets || 1), shooter);
+    }
+    const hitMat = wall && wall.collider ? MAT_SOUND[wall.collider.name] || null : null;
+    return { hitUnit: null, head: false, point: wall ? wall.point : origin.clone().addScaledVector(dir, maxD), t: wallT, mat: hitMat, collider: wall?.collider || null };
+  }
+
+  // 据点争夺：圈内单队 → 占领 3s → 持有方每 4s +1 分
+  updateKoth(dt) {
+    if (this.mode !== 'koth' || this.over) return;
+    this.pointT -= dt;
+    if (this.pointT > 0) return;
+    this.pointT = 0.25;
+    const pt = this.point;
+    const inZone = (u) => u.alive && Math.hypot(u.pos.x - KOTH.center.x, u.pos.z - KOTH.center.z) < KOTH.radius;
+    let nb = 0, nr = 0;
+    for (const u of this.allUnits()) {
+      if (!inZone(u)) continue;
+      if (u.team === 'blue') nb++;
+      else nr++;
+    }
+    const step = 0.25;
+    if (nb > 0 && nr === 0) {
+      const team = 'blue';
+      if (pt.owner !== team) {
+        if (pt.progTeam !== team) { pt.prog = Math.max(0, pt.prog - step * 2); if (pt.prog <= 0) pt.progTeam = team; }
+        else pt.prog += step;
+        if (pt.prog >= KOTH.captureTime) {
+          pt.owner = team; pt.prog = 0;
+          this.ui.killBanner(pt.owner === 'blue' ? '蓝队占领了据点！' : '红队占领了据点！', 'big');
+          this.audio.streak(2);
+        }
+      }
+    } else if (nr > 0 && nb === 0) {
+      const team = 'red';
+      if (pt.owner !== team) {
+        if (pt.progTeam !== team) { pt.prog = Math.max(0, pt.prog - step * 2); if (pt.prog <= 0) pt.progTeam = team; }
+        else pt.prog += step;
+        if (pt.prog >= KOTH.captureTime) {
+          pt.owner = team; pt.prog = 0;
+          this.ui.killBanner(pt.owner === 'blue' ? '蓝队占领了据点！' : '红队占领了据点！', 'big');
+          this.audio.streak(2);
+        }
+      }
+    } else if (nb > 0 && nr > 0) {
+      // 争夺中：进度冻结
+    }
+    if (pt.owner) {
+      this.pointHold += step;
+      if (this.pointHold >= KOTH.scoreInterval) {
+        this.pointHold = 0;
+        this.score[pt.owner]++;
+        this.ui.pointFlash();
+        const lim = MODES.koth.scoreLimit;
+        if (this.score[pt.owner] >= lim) this.endMatch();
+      }
+    }
+  }
+
+  // 油桶受击：闪暗、3 发引爆，爆炸可连锁
+  damageBarrel(rec, dmg, shooter) {
+    if (rec.dead) return;
+    rec.hp -= dmg;
+    rec.mesh.material.color.multiplyScalar(0.93);
+    if (rec.hp <= 0) {
+      rec.dead = true;
+      rec.mesh.visible = false;
+      const idx = this.world.colliders.indexOf(this.world.colliders.find((c) => c.barrel === rec));
+      if (idx >= 0) this.world.colliders.splice(idx, 1);
+      this.explode(new THREE.Vector3(rec.x, 0.45, rec.z), shooter || null);
+    }
   }
 
   explode(pos, owner) {
@@ -331,6 +404,13 @@ export class Game {
     this.addScorch(pos);
     const dCam = this.camera.position.distanceTo(pos);
     this.addTrauma(Math.max(0, 0.35 - dCam * 0.012));
+    // 连锁引爆附近油桶
+    for (const rec of [...this.world.barrels]) {
+      if (rec.dead) continue;
+      if (Math.hypot(rec.x - pos.x, rec.z - pos.z) < GRENADE.radius) {
+        this.damageBarrel(rec, 40, owner && owner.isPlayer ? owner : null);
+      }
+    }
     // 范围伤害
     for (const u of this.allUnits()) {
       if (!u.alive) continue;
@@ -376,7 +456,7 @@ export class Game {
       killer.streak = (killer.streak || 0) + 1;
       if (killer.streakBest === undefined) killer.streakBest = 0;
       killer.streakBest = Math.max(killer.streakBest, killer.streak);
-      if (this.mode === 'tdm') this.score[killer.team]++;
+      if (this.mode === 'tdm' || this.mode === 'koth') this.score[killer.team]++;
       else if (killer.isPlayer) this.score.blue = killer.kills;
     }
     victim.streak = 0;
@@ -421,7 +501,9 @@ export class Game {
     }
     // 胜负
     const lim = MODES[this.mode].scoreLimit;
-    if ((this.mode === 'tdm' && (this.score.blue >= lim || this.score.red >= lim)) ||
+    if (this.mode === 'koth') {
+      if (this.score.blue >= lim || this.score.red >= lim) this.endMatch();
+    } else if ((this.mode === 'tdm' && (this.score.blue >= lim || this.score.red >= lim)) ||
         (this.mode === 'ffa' && this.score.blue >= lim)) {
       this.endMatch();
     }
@@ -433,7 +515,7 @@ export class Game {
     if (!p.alive) {
       p.respawnT -= dt;
       if (p.respawnT <= 0) {
-        const arr = this.mode === 'tdm' ? this.world.spawns.blue : this.world.spawns.ffa;
+        const arr = this.mode === 'ffa' ? this.world.spawns.ffa : this.world.spawns.blue;
         p.respawn(arr[(Math.random() * arr.length) | 0].clone());
         this.audio.respawn();
       }
@@ -442,7 +524,7 @@ export class Game {
       if (b.alive) continue;
       b.respawnT -= dt;
       if (b.respawnT <= 0) {
-        const arr = this.mode === 'tdm' ? this.world.spawns[b.team] : this.world.spawns.ffa;
+        const arr = this.mode === 'ffa' ? this.world.spawns.ffa : this.world.spawns[b.team];
         let pt = arr[(Math.random() * arr.length) | 0].clone();
         // 远离敌人
         for (let tries = 0; tries < 6; tries++) {
@@ -466,11 +548,12 @@ export class Game {
     this.music.setIntensity(0);
     const p = this.player;
     let win;
-    if (this.mode === 'tdm') win = this.score.blue > this.score.red;
-    else {
+    if (this.mode === 'ffa') {
       let top = p.kills;
       for (const b of this.bots.bots) top = Math.max(top, b.kills);
       win = p.kills >= top && p.kills >= MODES.ffa.scoreLimit;
+    } else {
+      win = this.score.blue > this.score.red;
     }
     // 战绩 + 经验
     const s = this.ui.stats;
@@ -631,6 +714,7 @@ export class Game {
       this.bots.update(dt);
       this._respawnUnits(dt);
       this.updateRewards(dt);
+      this.updateKoth(dt);
       this.trauma = Math.max(0, this.trauma - dt * 1.7);
       this.timeLeft -= dt;
       if (this.timeLeft <= 0) this.endMatch();

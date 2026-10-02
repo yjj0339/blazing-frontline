@@ -77,7 +77,16 @@ export const DIFFS = {
 
 export const MODES = {
   tdm: { label: '团队死斗', scoreLimit: 30, time: 360, desc: '蓝队 vs 红队 · 先达 30 杀获胜' },
+  koth: { label: '据点争夺', scoreLimit: 60, time: 480, desc: '占领中央据点持续得分 · 先达 60 分' },
   ffa: { label: '个人混战', scoreLimit: 15, time: 300, desc: '以一敌七 · 先达 15 杀获胜' },
+};
+
+export const KOTH = { radius: 6, captureTime: 3, scoreInterval: 4, center: { x: 0, z: 0 } };
+
+// 命中材质音映射（collider.name → 音色）
+export const MAT_SOUND = {
+  con: 'metal', barrel: 'metal', wall: 'stone', wallR: 'stone', rock: 'stone',
+  crate: 'wood', tower: 'wood', fence: 'wood', sandbag: 'sand', pallet: 'wood',
 };
 
 export const TEAM_COLOR = {

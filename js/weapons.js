@@ -452,6 +452,7 @@ export class Weapons {
           this.sparks.burst(res.point, anyHead ? 0xff5a4d : 0xffd27a, 5, 4, eye);
         } else {
           this.sparks.burst(res.point, 0xbfae8e, 4, 3, eye);
+          if (res.mat) g.audio.impact(res.mat, res.point, g.camera);
         }
       }
     }

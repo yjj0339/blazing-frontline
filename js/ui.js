@@ -206,6 +206,17 @@ export class UI {
     // 奖励条节流刷新（UAV 倒计时）
     this._rwT = (this._rwT || 0) + dt;
     if (this._rwT > 0.3) { this._rwT = 0; this.refreshRewards(); }
+    // 据点模式 HUD
+    if (g.mode === 'koth') {
+      $('point-hud').classList.remove('hidden');
+      const pt = g.point;
+      const ph = $('point-hud');
+      ph.dataset.owner = pt.owner || 'none';
+      $('pt-fill').style.width = Math.round(pt.prog / 3 * 100) + '%';
+      $('pt-fill').style.background = pt.progTeam === 'blue' ? '#2f7fd4' : pt.progTeam === 'red' ? '#d0452f' : '#8a7a5c';
+      $('pt-owner').textContent = pt.owner === 'blue' ? '蓝队持有' : pt.owner === 'red' ? '红队持有' : (pt.prog > 0 ? '占领中' : '无主');
+    } else $('point-hud').classList.add('hidden');
+
     // 低血心跳
     this.game.audio.heartbeatTick && this.game.audio.heartbeatTick(dt, p.hp);
     // 狂暴倒计时显示
@@ -269,6 +280,13 @@ export class UI {
     $('rw-uav-t').textContent = g.uavT > 0 ? Math.ceil(g.uavT) + 's' : (g.rewards.uav ? '就绪' : REWARDS.uav.kills + '杀');
     s.classList.toggle('ready', g.rewards.strike);
     $('rw-strike-t').textContent = g.rewards.strike ? '就绪' : REWARDS.strike.kills + '杀';
+  }
+
+  pointFlash() {
+    const el = $('point-hud');
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
   }
 
   botSay(bot, text) {
@@ -349,6 +367,19 @@ export class UI {
     ctx.fillRect(-36 * s, -30 * s, 6 * s, 6 * s);
     ctx.fillStyle = 'rgba(220,90,70,0.35)';
     ctx.fillRect(30 * s, 24 * s, 6 * s, 6 * s);
+    // 据点圈
+    if (g.mode === 'koth') {
+      const pt = g.point;
+      ctx.beginPath();
+      ctx.arc(0, 0, 6 * s, 0, 7);
+      ctx.strokeStyle = pt.owner === 'blue' ? '#4da3ff' : pt.owner === 'red' ? '#ff5a48' : '#e8ddc0';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, 2.4 * s, 0, 7);
+      ctx.fillStyle = pt.owner === 'blue' ? 'rgba(90,150,220,0.6)' : pt.owner === 'red' ? 'rgba(220,90,70,0.6)' : 'rgba(230,220,190,0.5)';
+      ctx.fill();
+    }
     // 单位
     const uav = g.uavT > 0;
     for (const u of g.allUnits()) {
@@ -495,6 +526,7 @@ export class UI {
     bind('tb-reload', () => (inp.reload = true));
     bind('tb-grenade', () => (inp.grenade = true));
     bind('tb-swap', () => (inp.cycle = 1));
+    bind('tb-mode', () => (inp.toggleFire = true));
     bind('tb-uav', () => this.game.useUav());
     bind('tb-strike', () => this.game.useStrike());
   }

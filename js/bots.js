@@ -1,6 +1,6 @@
 // ===== Bot AI：感知/游走/交战/寻路/动画 =====
 import * as THREE from '../vendor/three.module.js';
-import { WEAPONS, DIFFS, BOT_NAMES, TEAM_COLOR } from './config.js';
+import { WEAPONS, DIFFS, BOT_NAMES, TEAM_COLOR, MAT_SOUND } from './config.js';
 
 const AR = WEAPONS.ar;
 
@@ -243,11 +243,15 @@ export class Bot {
   }
 
   pickRoam() {
-    // 偏向有敌人的区域（偏向地图中部与敌方半场）
+    // 偏向有敌人的区域；据点模式优先抢占中央
     const g = this.game;
     let pt;
-    if (Math.random() < 0.4) {
-      // 朝最近敌人方向
+    if (g.mode === 'koth' && Math.random() < 0.65) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 2 + Math.random() * 9;
+      pt = { x: Math.cos(a) * r, z: Math.sin(a) * r };
+    } else if (Math.random() < 0.4) {
+      // 朝最近敌人方向（精英难度：侧翼绕后）
       let en = null, bd = Infinity;
       for (const u of g.allUnits()) {
         if (u === this || !u.alive) continue;
@@ -256,7 +260,14 @@ export class Bot {
         if (d < bd) { bd = d; en = u; }
       }
       if (en) {
-        pt = { x: en.pos.x + (Math.random() - 0.5) * 14, z: en.pos.z + (Math.random() - 0.5) * 14 };
+        if (g.diffKey === 'hard' && bd > 16 && Math.random() < 0.6) {
+          const dx = en.pos.x - this.pos.x, dz = en.pos.z - this.pos.z;
+          const l = Math.hypot(dx, dz) || 1;
+          const side = Math.random() > 0.5 ? 1 : -1;
+          pt = { x: en.pos.x + (-dz / l) * 14 * side, z: en.pos.z + (dx / l) * 14 * side };
+        } else {
+          pt = { x: en.pos.x + (Math.random() - 0.5) * 14, z: en.pos.z + (Math.random() - 0.5) * 14 };
+        }
       }
     }
     if (!pt) pt = g.world.randomRoam();
@@ -359,8 +370,17 @@ export class Bot {
       const res = g.rayWorld(muzzle, dir, dist + 12);
       const end = res ? res.point : muzzle.clone().addScaledVector(dir, dist + 10);
       g.weapons.tracers.fire(muzzle, end, AR.tracer);
-      if (res) g.weapons.sparks.burst(end, 0xbfae8e, 3, 2.5);
-      // 擦身威胁：玩家近距 miss 有 whiz 音（省）
+      if (res) {
+        g.weapons.sparks.burst(end, 0xbfae8e, 3, 2.5, g.camera.position);
+        if (res.collider) {
+          const m = MAT_SOUND[res.collider.name];
+          if (m) g.audio.impact(m, end, g.camera);
+        }
+      }
+      // 擦身嗖声：失弹落点贴近玩家
+      if (target.isPlayer && end.distanceTo(g.player.eyePos) < 2.6) {
+        g.audio.whiz(end, g.camera);
+      }
     }
   }
 
@@ -482,12 +502,13 @@ export class BotManager {
     for (const b of this.bots) g.scene.remove(b.mesh);
     this.bots = [];
     const names = { ...BOT_NAMES };
-    if (mode === 'tdm') {
-      for (let i = 0; i < 6; i++) this.bots.push(new Bot(g, 'blue', names.blue[i]));
-      for (let i = 0; i < 7; i++) this.bots.push(new Bot(g, 'red', names.red[i]));
-    } else {
+    if (mode === 'ffa') {
       const pool = [...names.ffa, ...names.red.slice(0, 1)];
       for (let i = 0; i < 7; i++) this.bots.push(new Bot(g, 'red', pool[i], true));
+    } else {
+      // tdm / koth：两队阵容
+      for (let i = 0; i < 6; i++) this.bots.push(new Bot(g, 'blue', names.blue[i]));
+      for (let i = 0; i < 7; i++) this.bots.push(new Bot(g, 'red', names.red[i]));
     }
     for (const b of this.bots) b.buildMesh(g.assets.soldier, this.teamMats[b.team === 'blue' ? 'blue' : 'red']);
   }

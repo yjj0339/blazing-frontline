@@ -153,6 +153,32 @@ export class World {
     const crateB = pick('CrateBig');
     const crateS = pick('CrateSmall');
     const barrel = pick('Barrel');
+    // 油桶：可破坏爆炸物（独立网格，受击闪红，3 发引爆）
+    this.barrels = [];
+    const placeBarrel = (x, z, rot = 0) => {
+      const o = barrel.clone(true);
+      o.position.set(x, 0, z);
+      o.rotation.y = rot;
+      o.updateMatrixWorld(true);
+      const mat0 = o.getObjectByName('bb')?.material || o.children.find((c) => c.isMesh)?.material;
+      const geos = [];
+      o.traverse((c) => {
+        if (c.isMesh && c.geometry?.attributes?.position) {
+          const g = c.geometry.clone().applyMatrix4(c.matrixWorld);
+          g.deleteAttribute('uv');
+          geos.push(g);
+        }
+      });
+      const merged = geos.length > 1 ? mergeGeometries(geos, false) : geos[0];
+      const mesh = new THREE.Mesh(merged, mat0.clone());
+      mesh.castShadow = mesh.receiveShadow = true;
+      scene.add(mesh);
+      const rec = { mesh, hp: 30, x, z, dead: false };
+      this.barrels.push(rec);
+      this.addCollider(x, z, 0.58, 0.58, 0.9, 'barrel');
+      this.colliders[this.colliders.length - 1].barrel = rec;
+      geos.forEach((g) => g.dispose());
+    };
     const sandbag = pick('Sandbag');
     const tower = pick('Tower');
     const fence = pick('Fence');
@@ -194,7 +220,7 @@ export class World {
     const crateSpot = (x, z, bigRot = 0) => {
       place(crateB, x, z, bigRot); this.addCollider(x, z, 0.92, 0.92, 0.9, 'crate');
       place(crateS, x + 0.95, z + 0.25, Math.random() * 1.5); this.addCollider(x + 0.95, z + 0.25, 0.57, 0.57, 0.55, 'crate');
-      place(barrel, x - 0.2, z + 1.1); this.addCollider(x - 0.2, z + 1.1, 0.58, 0.58, 0.9, 'barrel');
+      placeBarrel(x - 0.2, z + 1.1);
     };
     sym4((sx, sz) => crateSpot(sx * 8.5, sz * 8.5));
 
@@ -220,8 +246,7 @@ export class World {
       place(crateS, cx - 2.2, cz + 2.4); this.addCollider(cx - 2.2, cz + 2.4, 0.57, 0.57, 0.55, 'crate');
       place(crateS, cx + 2.2, cz + 2.4); this.addCollider(cx + 2.2, cz + 2.4, 0.57, 0.57, 0.55, 'crate');
       for (let i = -1; i <= 1; i++) {
-        place(barrel, cx + i * 1.15, cz - 6.4);
-        this.addCollider(cx + i * 1.15, cz - 6.4, 0.58, 0.58, 0.9, 'barrel');
+        placeBarrel(cx + i * 1.15, cz - 6.4, Math.random() * 3);
       }
       place(pallet, cx + 5.5, cz + 3, 0.4); place(pallet, cx - 5.5, cz + 3, 1.2);
     };
@@ -247,10 +272,9 @@ export class World {
       if (p === rock1) this.addCollider(x, z, 1.0, 1.0, 0.62, 'rock');
       if (p === rock2) this.addCollider(x, z, 0.66, 0.66, 0.4, 'rock');
     }
-    // 零散油桶
+    // 零散油桶（可爆炸）
     for (const [x, z] of [[-27, -10], [27, 10], [-10, 27], [10, -27], [4, 15], [-4, -15], [22, 22], [-22, -22]]) {
-      place(barrel, x, z, Math.random() * 3);
-      this.addCollider(x, z, 0.58, 0.58, 0.9, 'barrel');
+      placeBarrel(x, z, Math.random() * 3);
     }
 
     // 合并静态几何
@@ -381,7 +405,7 @@ export class World {
   losDist(a, b) {
     let best = Infinity;
     for (const c of this.colliders) {
-      if (c.h < 0.5) continue;
+      if (c.dead || c.h < 0.5) continue;
       // 高度检查：线段在该障碍 t 区间的 z 值
       const t = this._segAABBT(a.x, a.z, b.x, b.z, c.x1, c.z1, c.x2, c.z2);
       if (t === null) continue;
@@ -411,6 +435,7 @@ export class World {
   slide(pos, radius) {
     for (let pass = 0; pass < 2; pass++) {
       for (const c of this.colliders) {
+        if (c.dead) continue;
         const nx = Math.max(c.x1, Math.min(pos.x, c.x2));
         const nz = Math.max(c.z1, Math.min(pos.z, c.z2));
         const dx = pos.x - nx, dz = pos.z - nz;
