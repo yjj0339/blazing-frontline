@@ -73,6 +73,53 @@ body { font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; col
   padding: 2px 12px; border-radius: 8px;
 }
 
+/* 连杀奖励条 */
+#reward-bar {
+  position: absolute; top: 88px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 8px; pointer-events: none;
+}
+#reward-bar span {
+  display: flex; align-items: center; gap: 4px;
+  background: rgba(255,252,245,0.55); border: 1px solid var(--ui-line);
+  border-radius: 9px; padding: 3px 9px; font-size: 14px;
+  filter: grayscale(1); opacity: 0.55; transition: all 0.2s;
+}
+#reward-bar span i { font-style: normal; font-size: 11px; color: #6b5f48; }
+#reward-bar span.ready {
+  filter: none; opacity: 1; pointer-events: auto; cursor: pointer;
+  border-color: #ffb347; background: rgba(255,220,150,0.92);
+  box-shadow: 0 0 12px rgba(255,170,60,0.55);
+  animation: rwPulse 1.2s infinite;
+}
+#reward-bar span.active {
+  filter: none; opacity: 1; border-color: #7fe07f;
+  background: rgba(160,240,170,0.92);
+}
+@keyframes rwPulse { 50% { transform: scale(1.07); } }
+
+/* bot 喊话气泡 */
+#bubble-layer { position: absolute; inset: 0; pointer-events: none; }
+.bot-bubble {
+  position: absolute; transform: translate(-50%, -120%);
+  background: rgba(255,253,246,0.94); border-radius: 10px;
+  padding: 4px 11px; font-size: 13px; font-weight: 700; color: #3a3428;
+  box-shadow: 0 2px 8px rgba(40,30,10,0.25);
+  animation: bubbleIn 0.18s; transition: opacity 0.35s;
+  white-space: nowrap;
+}
+.bot-bubble::after {
+  content: ""; position: absolute; left: 50%; bottom: -6px; margin-left: -5px;
+  border: 5px solid transparent; border-top-color: rgba(255,253,246,0.94);
+  border-bottom: none;
+}
+.bot-bubble.bb { border-left: 3px solid #2f7fd4; }
+.bot-bubble.br { border-left: 3px solid #d0452f; }
+.bot-bubble.fade { opacity: 0; }
+@keyframes bubbleIn { from { transform: translate(-50%, -100%) scale(0.7); opacity: 0; } }
+
+/* 治疗飘字 */
+.dmg-num.heal { color: #58e07a; font-size: 19px; }
+
 /* 小地图 */
 #minimap {
   position: absolute; top: 12px; left: 12px;

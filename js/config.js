@@ -4,7 +4,7 @@ export const MAP_HALF = 40;              // 地图半宽（米）
 export const WEAPONS = {
   ar: {
     id: 'ar', name: '突击步枪 AR-7', slot: 1, auto: true,
-    dmg: 22, headMul: 2.0, rpm: 600, mag: 30, reserve: 150,
+    dmg: 25, headMul: 2.0, rpm: 640, mag: 30, reserve: 150,
     spreadStand: 1.7, spreadAds: 0.45, spreadMove: 1.3, spreadJump: 3.2,
     recoil: 0.85, recoilAds: 0.5, reload: 2.1, kick: 0.05,
     adsFov: 55, tracer: '#ffd27a', pellete: 1, range: 70,
@@ -36,9 +36,17 @@ export const WEAPON_ORDER = ['ar', 'sg', 'sr', 'pg'];
 export const GRENADE = { dmg: 115, radius: 6.2, fuse: 2.1, carry: 3, replenish: 18, throwSpeed: 15 };
 
 export const PLAYER = {
-  hp: 100, walk: 5.2, sprint: 7.6, crouch: 2.7, ads: 3.5,
-  accel: 46, friction: 10, jumpV: 5.7, gravity: 15.5,
-  eyeStand: 1.62, eyeCrouch: 1.06, radius: 0.38, regenDelay: 4.5, regenRate: 22,
+  hp: 100, walk: 5.4, sprint: 8.0, crouch: 2.7, ads: 3.5,
+  accel: 46, friction: 10, jumpV: 5.8, gravity: 15.5,
+  eyeStand: 1.62, eyeCrouch: 1.06, radius: 0.38, regenDelay: 3.2, regenRate: 34,
+  killHeal: 25,
+  slide: { speed: 10.5, time: 0.62, endSpeed: 4.2 },
+};
+
+// 连杀奖励（玩家专属）
+export const REWARDS = {
+  uav: { kills: 3, time: 9, label: '侦察机', desc: '全图敌人暴露 9 秒' },
+  strike: { kills: 6, label: '空袭', desc: '在准星处召唤 4 连爆' },
 };
 
 export const BOT_NAMES = {
@@ -48,9 +56,9 @@ export const BOT_NAMES = {
 };
 
 export const DIFFS = {
-  easy:   { label: '新兵', react: 0.65, acc: 0.30, dmgMul: 0.7,  burst: 3, speed: 4.6, vision: 46 },
-  normal: { label: '老兵', react: 0.42, acc: 0.42, dmgMul: 1.0,  burst: 4, speed: 5.0, vision: 55 },
-  hard:   { label: '精英', react: 0.28, acc: 0.55, dmgMul: 1.3,  burst: 5, speed: 5.4, vision: 62 },
+  easy:   { label: '新兵', react: 0.7,  acc: 0.24, dmgMul: 0.65, burst: 3, speed: 4.5, vision: 44 },
+  normal: { label: '老兵', react: 0.46, acc: 0.35, dmgMul: 0.9,  burst: 4, speed: 4.9, vision: 52 },
+  hard:   { label: '精英', react: 0.3,  acc: 0.48, dmgMul: 1.2,  burst: 5, speed: 5.3, vision: 60 },
 };
 
 export const MODES = {

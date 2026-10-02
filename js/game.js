@@ -1,7 +1,7 @@
 // ===== 对局核心：初始化/循环/命中/击杀/重生/结束 =====
 import * as THREE from '../vendor/three.module.js';
 import { GLTFLoader } from '../vendor/examples/jsm/loaders/GLTFLoader.js';
-import { MAP_HALF, WEAPONS, WEAPON_ORDER, GRENADE, PLAYER, MODES, DIFFS, TEAM_COLOR, LS_STATS } from './config.js';
+import { MAP_HALF, WEAPONS, WEAPON_ORDER, GRENADE, PLAYER, MODES, DIFFS, TEAM_COLOR, LS_STATS, REWARDS } from './config.js';
 import { World } from './world.js';
 import { Player } from './player.js';
 import { Weapons } from './weapons.js';
@@ -49,6 +49,11 @@ export class Game {
     this.ui = new UI(this);
     this.ui.setupTouch();
     this.applySettings();
+    this.trauma = 0;
+    this.uavT = 0;
+    this.pendingStrikes = [];
+    this.rewards = { uav: false, strike: false };
+    this._lastSay = -9;
 
     this._resize();
     window.addEventListener('resize', () => this._resize());
@@ -97,6 +102,10 @@ export class Game {
     this.timeLeft = MODES[mode].time;
     this.over = false;
     this.state = 'playing';
+    this.uavT = 0;
+    this.pendingStrikes = [];
+    this.rewards = { uav: false, strike: false };
+    this.trauma = 0;
     this.bots.spawnAll(mode);
     // 出生
     const sp = this.world.spawns;
@@ -137,6 +146,59 @@ export class Game {
     this.state = 'menu';
     this.over = true;
     this.ui.toMenu();
+  }
+
+  addTrauma(k) {
+    this.trauma = Math.min(1, (this.trauma || 0) + k);
+  }
+
+  // ---- 连杀奖励 ----
+  useUav() {
+    if (!this.rewards.uav || this.uavT > 0 || this.state !== 'playing') return;
+    this.rewards.uav = false;
+    this.uavT = REWARDS.uav.time;
+    this.ui.streakBanner('侦察机升空 · 敌人全部暴露');
+    this.audio.streak(3);
+    this.ui.refreshRewards();
+  }
+  useStrike() {
+    if (!this.rewards.strike || this.state !== 'playing' || !this.player.alive) return;
+    this.rewards.strike = false;
+    const p = this.player;
+    const dir = p.dir;
+    const hit = this.rayWorld(p.eyePos, dir, 80);
+    const target = hit
+      ? hit.point.clone()
+      : p.eyePos.addScaledVector(dir, 45);
+    for (let i = 0; i < 4; i++) {
+      const ang = (i / 4) * Math.PI * 2 + Math.random();
+      const r = i === 0 ? 0 : 4.5;
+      this.pendingStrikes.push({
+        pos: new THREE.Vector3(target.x + Math.cos(ang) * r, 0, target.z + Math.sin(ang) * r),
+        t: 1.6 + i * 0.24,
+      });
+    }
+    this.ui.streakBanner('空袭已标记 · 注意隐蔽');
+    this.audio.streak(4);
+    this.ui.refreshRewards();
+  }
+  updateRewards(dt) {
+    this.uavT = Math.max(0, this.uavT - dt);
+    for (let i = this.pendingStrikes.length - 1; i >= 0; i--) {
+      const s = this.pendingStrikes[i];
+      s.t -= dt;
+      if (s.t <= 0) {
+        this.pendingStrikes.splice(i, 1);
+        this.explode(s.pos, this.player);
+      }
+    }
+  }
+
+  botSay(bot, text) {
+    const now = performance.now() / 1000;
+    if (now - this._lastSay < 2.0) return;
+    this._lastSay = now;
+    this.ui.botSay(bot, text);
   }
 
   // ============ 命中 ============
@@ -213,6 +275,8 @@ export class Game {
     this.audio.explosion(pos, this.camera);
     this.weapons.sparks.burst(pos, 0xffa640, 22, 9);
     this.weapons.sparks.burst(pos, 0x6b6b6b, 14, 5);
+    const dCam = this.camera.position.distanceTo(pos);
+    this.addTrauma(Math.max(0, 0.35 - dCam * 0.012));
     // 范围伤害
     for (const u of this.allUnits()) {
       if (!u.alive) continue;
@@ -243,6 +307,7 @@ export class Game {
   // ============ 击杀/受伤回调 ============
   onPlayerHurt(from, head, amount) {
     this.ui.vignette(Math.min(0.85, 0.3 + amount / 120));
+    this.addTrauma(0.14);
     if (from) this.ui.damageDir(from.pos);
     this.audio.hurt();
   }
@@ -262,21 +327,31 @@ export class Game {
     this.ui.killfeed(killer, victim, head, wName);
 
     if (killer && killer.isPlayer && victim !== killer) {
+      // 击杀奖励：回血 + 连杀解锁
+      killer.hp = Math.min(PLAYER.hp, killer.hp + PLAYER.killHeal);
+      this.ui.spawnHeal(PLAYER.killHeal);
+      const n = killer.streak;
+      if (n === REWARDS.uav.kills) { this.rewards.uav = true; this.ui.streakBanner('侦察机就绪 · 按 5 释放'); }
+      if (n === REWARDS.strike.kills) { this.rewards.strike = true; this.ui.streakBanner('空袭就绪 · 按 6 释放'); }
+      this.ui.refreshRewards();
       this.audio.kill();
       this.ui.hitmarker(head);
-      const n = killer.streak;
+      this.addTrauma(0.05);
       this.ui.killBanner(head ? `爆头击杀 ${victim.name}！` : `击杀了 ${victim.name}`);
       if (n === 2) { this.ui.streakBanner('双杀！'); this.audio.streak(2); }
       else if (n === 3) { this.ui.streakBanner('三连杀！'); this.audio.streak(3); }
       else if (n === 4) { this.ui.streakBanner('四连杀！火力全开！'); this.audio.streak(4); }
       else if (n >= 5) { this.ui.streakBanner(`${n} 连杀 · 杀神降临！`); this.audio.streak(5); }
     }
+    if (killer && !killer.isPlayer && killer !== victim) {
+      this.botSay(killer, victim.isPlayer ? ['拿下指挥官！', '搞定一个！', '干净利落'][(Math.random() * 3) | 0]
+        : ['拿下！', '下一个是谁？', '换我上！'][(Math.random() * 3) | 0]);
+    }
 
     if (victim.isPlayer) {
-      victim.respawnT = 4;
-      this.audio.lose && null;
+      victim.respawnT = 2.5;
     } else {
-      victim.respawnT = 4;
+      victim.respawnT = 2.5;
     }
     // 胜负
     const lim = MODES[this.mode].scoreLimit;
@@ -347,6 +422,7 @@ export class Game {
       moveX: 0, moveY: 0, jump: false, crouch: false, sprint: false,
       firing: false, ads: false, reload: false, grenade: false,
       switchTo: null, cycle: 0, lookDX: 0, lookDY: 0,
+      useUav: false, useStrike: false,
     };
     const keys = {};
     const syncMove = () => {
@@ -366,6 +442,8 @@ export class Game {
       if (e.code === 'Digit2') inp.switchTo = 'sg';
       if (e.code === 'Digit3') inp.switchTo = 'sr';
       if (e.code === 'Digit4') inp.switchTo = 'pg';
+      if (e.code === 'Digit5') inp.useUav = true;
+      if (e.code === 'Digit6') inp.useStrike = true;
       if (e.code === 'KeyQ') inp.cycle = -1;
       if (e.code === 'Escape' && this.state === 'playing') this.togglePause(true);
       syncMove();
@@ -444,11 +522,16 @@ export class Game {
 
     if (this.state === 'playing' && !this.over) {
       this._consumeLook();
+      // 连杀奖励按键
+      if (this.input.useUav) { this.input.useUav = false; this.useUav(); }
+      if (this.input.useStrike) { this.input.useStrike = false; this.useStrike(); }
       this.player.update(dt, this.input);
       this.weapons.update(dt, this.input);
       this.input.jump = false;
       this.bots.update(dt);
       this._respawnUnits(dt);
+      this.updateRewards(dt);
+      this.trauma = Math.max(0, this.trauma - dt * 1.7);
       this.timeLeft -= dt;
       if (this.timeLeft <= 0) this.endMatch();
       this.ui.updateHUD(dt);

@@ -1,5 +1,6 @@
 // ===== 全部界面：HUD/菜单/结算/小地图/移动端 =====
-import { MODES, DIFFS, WEAPONS, LS_SETTINGS, LS_STATS, TEAM_COLOR } from './config.js';
+import * as THREE from '../vendor/three.module.js';
+import { MODES, DIFFS, WEAPONS, LS_SETTINGS, LS_STATS, TEAM_COLOR, REWARDS } from './config.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -40,6 +41,7 @@ export class UI {
     this.hide('menu'); this.hide('end-panel'); this.hide('pause-panel');
     this.show('hud');
     this.game.state = 'playing';
+    this.refreshRewards();
   }
 
   // ---------- 菜单 ----------
@@ -167,6 +169,9 @@ export class UI {
     v.classList.toggle('crit', p.alive && p.hp < 30);
     this.drawMinimap();
     this.updateDmgNums();
+    // 奖励条节流刷新（UAV 倒计时）
+    this._rwT = (this._rwT || 0) + dt;
+    if (this._rwT > 0.3) { this._rwT = 0; this.refreshRewards(); }
     // 死亡重生提示
     const rp = $('respawn-tip');
     if (!p.alive) {
@@ -208,6 +213,43 @@ export class UI {
     setTimeout(() => el.remove(), 750);
   }
   updateDmgNums() { /* 纯 CSS 动画，无需逐帧 */ }
+
+  // ---------- 连杀奖励 UI ----------
+  refreshRewards() {
+    const g = this.game;
+    if (!g.rewards) return;
+    const u = $('rw-uav'), s = $('rw-strike');
+    u.classList.toggle('ready', g.rewards.uav);
+    u.classList.toggle('active', g.uavT > 0);
+    $('rw-uav-t').textContent = g.uavT > 0 ? Math.ceil(g.uavT) + 's' : (g.rewards.uav ? '就绪' : REWARDS.uav.kills + '杀');
+    s.classList.toggle('ready', g.rewards.strike);
+    $('rw-strike-t').textContent = g.rewards.strike ? '就绪' : REWARDS.strike.kills + '杀';
+  }
+
+  botSay(bot, text) {
+    const layer = $('bubble-layer');
+    if (!layer) return;
+    const v = bot.pos.clone().add(new THREE.Vector3(0, 2.15, 0)).project(this.game.camera);
+    if (v.z > 1) return;
+    const el = document.createElement('div');
+    el.className = 'bot-bubble' + (bot.team === 'blue' ? ' bb' : ' br');
+    el.textContent = bot.name + '：' + text;
+    el.style.left = ((v.x * 0.5 + 0.5) * 100) + '%';
+    el.style.top = ((-v.y * 0.5 + 0.5) * 100) + '%';
+    layer.appendChild(el);
+    setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 350); }, 1700);
+  }
+
+  spawnHeal(amount) {
+    const layer = $('dmg-layer');
+    const el = document.createElement('div');
+    el.className = 'dmg-num heal';
+    el.textContent = '+' + amount;
+    el.style.left = '50%';
+    el.style.top = '58%';
+    layer.appendChild(el);
+    setTimeout(() => el.remove(), 750);
+  }
 
   killfeed(killer, victim, head, weaponName) {
     const kf = $('killfeed');
@@ -263,19 +305,26 @@ export class UI {
     ctx.fillStyle = 'rgba(220,90,70,0.35)';
     ctx.fillRect(30 * s, 24 * s, 6 * s, 6 * s);
     // 单位
+    const uav = g.uavT > 0;
     for (const u of g.allUnits()) {
       if (!u.alive || u.isPlayer) continue;
       const friend = g.mode === 'tdm' && u.team === p.team;
       let show = friend;
       if (!friend) {
         const st = u.shotAt || -9;
-        if (now - st < 2.2) show = true;
+        show = uav || (now - st < 2.2);
       }
       if (!show) continue;
       ctx.beginPath();
-      ctx.arc(u.pos.x * s, u.pos.z * s, 3.2, 0, 7);
+      ctx.arc(u.pos.x * s, u.pos.z * s, friend ? 3.2 : 3.6, 0, 7);
       ctx.fillStyle = friend ? '#4da3ff' : '#ff5a48';
       ctx.fill();
+      // UAV 时敌军加描边闪
+      if (!friend && uav) {
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#ffd25e';
+        ctx.stroke();
+      }
     }
     ctx.restore();
     // 玩家箭头
@@ -398,6 +447,8 @@ export class UI {
     bind('tb-reload', () => (inp.reload = true));
     bind('tb-grenade', () => (inp.grenade = true));
     bind('tb-swap', () => (inp.cycle = 1));
+    bind('tb-uav', () => this.game.useUav());
+    bind('tb-strike', () => this.game.useStrike());
   }
   isTouch() {
     return window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;

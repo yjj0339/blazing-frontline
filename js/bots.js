@@ -89,6 +89,7 @@ export class Bot {
         this.target = best;
         // 反应时间：距离越近越快
         this.reactT = this.game.diff.react * (0.7 + Math.random() * 0.6) * (bd > 30 ? 1.4 : 1);
+        if (best.isPlayer) this.game.botSay(this, ['发现目标！', '指挥官在那边！', '看到他了！'][(Math.random() * 3) | 0]);
       }
       this.state = 'combat';
       this.lastSeen = best.pos.clone();
@@ -117,7 +118,9 @@ export class Bot {
     if (!this.alive) {
       this.deadT += dt;
       if (this.deadT < 0.4) {
-        this.mesh.rotation.x = (this.deadT / 0.4) * Math.PI / 2 * 0.96;
+        const k = this.deadT / 0.4;
+        this.mesh.rotation.x = k * Math.PI / 2 * 0.96;
+        this.mesh.position.y = Math.sin(k * Math.PI) * 0.16; // 倒地小弹跳
       }
       if (this.deadT > 2.6) this.mesh.visible = false;
       return;
@@ -287,7 +290,7 @@ export class Bot {
 
     if (hit) {
       const r = Math.random();
-      const head = r < 0.14;
+      const head = r < 0.10;
       const leg = r > 0.82;
       let dmg = AR.dmg * (head ? AR.headMul : 1) * (leg ? 0.75 : 1);
       if (!target.isPlayer) dmg *= 0.62;   // bot 互伤降低，拉长战场节奏

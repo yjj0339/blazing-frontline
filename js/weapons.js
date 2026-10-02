@@ -121,11 +121,43 @@ class Grenades {
 }
 
 // ---------- 第一人称视图模型 ----------
+let muzzleTex = null;
+function getMuzzleTexture() {
+  if (muzzleTex) return muzzleTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const rg = g.createRadialGradient(32, 32, 2, 32, 32, 30);
+  rg.addColorStop(0, 'rgba(255,240,190,1)');
+  rg.addColorStop(0.35, 'rgba(255,180,70,0.9)');
+  rg.addColorStop(0.75, 'rgba(255,120,30,0.35)');
+  rg.addColorStop(1, 'rgba(255,90,20,0)');
+  g.fillStyle = rg;
+  g.fillRect(0, 0, 64, 64);
+  // 星芒
+  g.strokeStyle = 'rgba(255,220,140,0.9)';
+  g.lineWidth = 4;
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.4;
+    g.beginPath();
+    g.moveTo(32 + Math.cos(a) * 6, 32 + Math.sin(a) * 6);
+    g.lineTo(32 + Math.cos(a) * 29, 32 + Math.sin(a) * 29);
+    g.stroke();
+  }
+  muzzleTex = new THREE.CanvasTexture(c);
+  return muzzleTex;
+}
+
+const MUZZLE_POS = { ar: [0, 0.505, 0.045], sg: [0, 0.47, 0.05], sr: [0, 0.67, 0.045], pg: [0, 0.165, 0.038] };
+const MUZZLE_SIZE = { ar: 0.17, sg: 0.22, sr: 0.2, pg: 0.13 };
+
 class ViewModel {
   constructor(game) {
     this.game = game;
     this.group = new THREE.Group();
     this.models = {};
+    this.flashes = {};
+    this.flashT = 0;
     this.current = null;
     this.kick = 0; this.reloadK = 0;
     this.swapT = 0;
@@ -142,7 +174,24 @@ class ViewModel {
       m.position.set(0, 0, 0);
       this.models[k] = m;
       this.group.add(m);
+      // 枪口火光面片
+      const [mx, my, mz] = MUZZLE_POS[k] || [0, 0.5, 0.05];
+      const s = MUZZLE_SIZE[k] || 0.16;
+      const flash = new THREE.Mesh(
+        new THREE.PlaneGeometry(s, s),
+        new THREE.MeshBasicMaterial({
+          map: getMuzzleTexture(), transparent: true, depthWrite: false,
+          blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        })
+      );
+      flash.position.set(mx, my, mz);
+      flash.visible = false;
+      flash.frustumCulled = false;
+      flash.renderOrder = 5;
+      this.group.add(flash);
+      this.flashes[k] = flash;
     }
+    this.flashT = 0;
   }
   show(k) {
     if (this.current) this.current.visible = false;
@@ -154,6 +203,13 @@ class ViewModel {
   fireKick(w) {
     this.kick = Math.min(1.6, this.kick + 1);
     this._baseKick = w.kick;
+    const fl = this.flashes[this.game.inv.current];
+    if (fl) {
+      fl.visible = true;
+      fl.rotation.z = Math.random() * Math.PI;
+      fl.scale.setScalar(0.85 + Math.random() * 0.5);
+      this.flashT = 0.045;
+    }
   }
   update(dt, player, inp) {
     if (!this.current) return;
@@ -162,6 +218,12 @@ class ViewModel {
     const hideForScope = w.scope && player.adsT > 0.82;
     this.group.visible = !hideForScope;
     if (hideForScope) return;
+    if (this.flashT > 0) {
+      this.flashT -= dt;
+      if (this.flashT <= 0) {
+        for (const k in this.flashes) this.flashes[k].visible = false;
+      }
+    }
     this.kick = Math.max(0, this.kick - dt * 9);
     this.swapT = Math.max(0, this.swapT - dt);
     const ads = player.adsT;
@@ -329,6 +391,7 @@ export class Weapons {
     p.shotsFired++;
     p.addRecoil(w.recoil * (1 - p.adsT * 0.45) * 0.017);
     this.vm.fireKick(w);
+    g.addTrauma(0.035);
     this.muzzleT = 0.05;
     g.audio.shoot(w.id, null, null);
     // 扩散

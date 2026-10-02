@@ -28,6 +28,8 @@ export class Player {
     this.lastDmgFrom = null;
     this.moveSpeed = 0;                       // 供脚步/FOV
     this.respawnT = 0;
+    this.slideT = 0; this.slideCd = 0; this.slideDir = { x: 0, z: 0 };
+    this.protectT = 0;
   }
 
   get eyePos() {
@@ -46,6 +48,7 @@ export class Player {
     this.pos.copy(at); this.vel.set(0, 0, 0);
     this.hp = PLAYER.hp; this.alive = true;
     this.protectT = 2.0;
+    this.slideT = 0; this.slideCd = 0;
     this.regenT = 0; this.streak = 0;
     this.wantCrouch = false; this.grounded = true;
     this.game.inv.fullReset();
@@ -80,20 +83,35 @@ export class Player {
     // ---- 姿态 ----
     const wantC = inp.crouch && this.grounded;
     this.wantCrouch = wantC;
-    const targetC = wantC ? 1 : 0;
+    const targetC = wantC || this.slideT > 0 ? 1 : 0;
     this.crouchT += (targetC - this.crouchT) * Math.min(1, dt * 10);
-    this.eyeY = PLAYER.eyeStand + (PLAYER.eyeCrouch - PLAYER.eyeStand) * this.crouchT;
+    const slideK = this.slideT > 0 ? 1 : 0;
+    this.eyeY = PLAYER.eyeStand + (PLAYER.eyeCrouch - PLAYER.eyeStand) * this.crouchT - slideK * 0.24;
 
     // ---- ADS ----
     const canAds = !inp.sprint && this.speedNow < 6.4;
     this.adsT += (((inp.ads && canAds) ? 1 : 0) - this.adsT) * Math.min(1, dt * 12);
 
-    // ---- 移动 ----
+    // ---- 移动（脆手感：地面快速贴到目标速度）----
     const sprinting = inp.sprint && inp.moveY > 0.1 && !inp.ads && !wantC && this.grounded;
     let maxSp = PLAYER.walk;
     if (sprinting) maxSp = PLAYER.sprint;
-    if (wantC) maxSp = PLAYER.crouch;
+    if (wantC && this.slideT <= 0) maxSp = PLAYER.crouch;
     if (inp.ads) maxSp = Math.min(maxSp, PLAYER.ads);
+
+    // 触发滑铲：冲刺状态中按蹲（sprintWish 不含姿态，避免与 sprinting 互斥）
+    const spd = Math.hypot(this.vel.x, this.vel.z);
+    const sprintWish = inp.sprint && inp.moveY > 0.1 && !inp.ads;
+    if (sprintWish && wantC && this.grounded && spd > 6.2 && this.slideT <= 0 && this.slideCd <= 0) {
+      this.slideT = PLAYER.slide.time;
+      this.slideCd = 1.15;
+      const inv = 1 / (spd || 1);
+      this.slideDir = { x: this.vel.x * inv, z: this.vel.z * inv };
+      g.audio.footstep(null, null, true);
+    }
+    this.slideCd = Math.max(0, this.slideCd - dt);
+    this.slideT = Math.max(0, this.slideT - dt);
+    const sliding = this.slideT > 0 && this.grounded;
 
     const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
@@ -103,20 +121,29 @@ export class Player {
     if (wish.lengthSq() > 1) wish.normalize();
     wish.multiplyScalar(maxSp);
 
-    const acc = this.grounded ? PLAYER.accel : PLAYER.accel * 0.35;
-    this.vel.x += (wish.x - this.vel.x) * Math.min(1, acc * dt / Math.max(maxSp, 0.01) * 3);
-    this.vel.z += (wish.z - this.vel.z) * Math.min(1, acc * dt / Math.max(maxSp, 0.01) * 3);
-    if (this.grounded && wish.lengthSq() < 0.01) {
-      const f = Math.max(0, 1 - PLAYER.friction * dt);
-      this.vel.x *= f; this.vel.z *= f;
+    if (sliding) {
+      // 滑铲：沿初始方向冲，速度衰减；跳起=滑跳保留速度
+      const k = this.slideT / PLAYER.slide.time;
+      const sp = PLAYER.slide.endSpeed + (PLAYER.slide.speed - PLAYER.slide.endSpeed) * k;
+      this.vel.x = this.slideDir.x * sp;
+      this.vel.z = this.slideDir.z * sp;
+      if (inp.jump) {
+        this.vel.y = PLAYER.jumpV * 0.95;
+        this.grounded = false;
+        this.slideT = 0;
+        g.audio.jump();
+      }
+    } else {
+      const t = this.grounded ? Math.min(1, dt * 13) : Math.min(1, dt * 2.4);
+      this.vel.x += (wish.x - this.vel.x) * t;
+      this.vel.z += (wish.z - this.vel.z) * t;
+      // 跳跃
+      if (inp.jump && this.grounded && !wantC) {
+        this.vel.y = PLAYER.jumpV; this.grounded = false;
+        g.audio.jump();
+      }
     }
     this.moveSpeed = Math.hypot(this.vel.x, this.vel.z);
-
-    // ---- 跳跃/重力 ----
-    if (inp.jump && this.grounded && !wantC) {
-      this.vel.y = PLAYER.jumpV; this.grounded = false;
-      g.audio.jump();
-    }
     this.vel.y -= PLAYER.gravity * dt;
     this.pos.y += this.vel.y * dt;
     if (this.pos.y <= 0) {
@@ -150,17 +177,21 @@ export class Player {
     this.recoilPitch *= Math.max(0, 1 - dt * 9);
     this.recoilYaw *= Math.max(0, 1 - dt * 9);
 
-    // ---- 相机 ----
+    // ---- 相机（含屏震）----
     const cam = g.camera;
+    const tr = (g.trauma || 0) ** 2;
+    const tN = performance.now() / 1000;
+    const shX = tr * 0.04 * Math.sin(tN * 67.3);
+    const shY = tr * 0.04 * Math.cos(tN * 55.7);
     const bobA = this.adsT > 0.5 ? 0.012 : 0.03;
     const bobY = Math.abs(Math.sin(this.bobPhase * 2)) * bobA * Math.min(1, this.moveSpeed / 4);
     const bobX = Math.sin(this.bobPhase) * bobA * Math.min(1, this.moveSpeed / 4);
     cam.position.set(
-      this.pos.x + bobX * Math.cos(this.yaw),
-      this.pos.y + this.eyeY - bobY - this.landK * 0.14,
+      this.pos.x + bobX * Math.cos(this.yaw) + shX,
+      this.pos.y + this.eyeY - bobY - this.landK * 0.14 + shY,
       this.pos.z - bobX * Math.sin(this.yaw)
     );
-    cam.rotation.set(this.pitch + this.recoilPitch, this.yaw + this.recoilYaw, Math.sin(this.bobPhase) * 0.006, 'YXZ');
+    cam.rotation.set(this.pitch + this.recoilPitch, this.yaw + this.recoilYaw, Math.sin(this.bobPhase) * 0.006 + tr * 0.02 * Math.sin(tN * 71), 'YXZ');
   }
 
   addRecoil(r) {

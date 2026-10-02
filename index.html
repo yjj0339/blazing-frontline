@@ -39,6 +39,11 @@
     <span class="sc sc-r" id="score-red">0</span>
   </div>
   <div id="mode-tag">团队死斗</div>
+  <div id="reward-bar">
+    <span id="rw-uav" title="侦察机">🔍<i id="rw-uav-t">3杀</i></span>
+    <span id="rw-strike" title="空袭">💥<i id="rw-strike-t">6杀</i></span>
+  </div>
+  <div id="bubble-layer"></div>
 
   <canvas id="minimap" width="176" height="176"></canvas>
 
@@ -100,11 +105,12 @@
       <tr><td>鼠标 / 右拖</td><td>视角</td></tr>
       <tr><td>左键</td><td>开火（长按连发）</td></tr>
       <tr><td>右键</td><td>机瞄 / 狙击开镜</td></tr>
-      <tr><td>Shift</td><td>冲刺</td></tr>
+      <tr><td>Shift</td><td>冲刺（冲刺中按 C 滑铲）</td></tr>
       <tr><td>C</td><td>蹲下（更稳更小目标）</td></tr>
       <tr><td>空格</td><td>跳跃</td></tr>
       <tr><td>R</td><td>换弹</td></tr>
       <tr><td>1 / 2 / 3 / 4</td><td>步枪 / 霰弹 / 狙击 / 手枪</td></tr>
+      <tr><td>5 / 6</td><td>侦察机 / 空袭（连杀解锁）</td></tr>
       <tr><td>滚轮 / Q</td><td>切换武器</td></tr>
       <tr><td>G</td><td>投掷手雷</td></tr>
       <tr><td>Tab</td><td>比分板</td></tr>
@@ -175,6 +181,8 @@
     <button id="tb-reload">弹</button>
     <button id="tb-grenade">雷</button>
     <button id="tb-swap">枪</button>
+    <button id="tb-uav">🔍</button>
+    <button id="tb-strike">💥</button>
   </div>
 </div>
 <div id="rotate-tip" class="hidden">📱 请横屏游玩以获得最佳体验</div>
