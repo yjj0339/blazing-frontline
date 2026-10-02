@@ -162,9 +162,22 @@ export class Game {
       b.shotAt = -9;
     });
     this.ui.toGame();
+    document.getElementById('mode-tag').textContent = MODES[mode].label;
+    document.getElementById('sb-mode').textContent = MODES[mode].label;
+    // 据点圈标记（A 点实体环）
+    if (mode === 'koth' && !this.pointRing) {
+      this.pointRing = new THREE.Mesh(
+        new THREE.RingGeometry(KOTH.radius - 0.5, KOTH.radius, 40),
+        new THREE.MeshBasicMaterial({ color: 0xe8ddc0, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
+      );
+      this.pointRing.rotation.x = -Math.PI / 2;
+      this.pointRing.position.set(KOTH.center.x, 0.04, KOTH.center.z);
+      this.scene.add(this.pointRing);
+    }
+    if (this.pointRing) this.pointRing.visible = mode === 'koth';
     this.ui.refreshAmmo();
     this.vm.show(this.inv.current);
-    this.ui.killBanner(mode === 'tdm' ? '团队死斗 · 消灭红队！' : '个人混战 · 你只能相信自己！', 'big');
+    this.ui.killBanner(mode === 'tdm' ? '团队死斗 · 消灭红队！' : mode === 'koth' ? '占领中央据点 A！' : '个人混战 · 你只能相信自己！', 'big');
     if (!this.ui.isTouch() && document.body.requestPointerLock) {
       try {
         const r = document.getElementById('c').requestPointerLock();
@@ -334,6 +347,11 @@ export class Game {
   // 据点争夺：圈内单队 → 占领 3s → 持有方每 4s +1 分
   updateKoth(dt) {
     if (this.mode !== 'koth' || this.over) return;
+    // 点圈颜色随归属
+    if (this.pointRing) {
+      this.pointRing.material.color.setHex(
+        this.point.owner === 'blue' ? 0x2f7fd4 : this.point.owner === 'red' ? 0xd0452f : 0xe8ddc0);
+    }
     this.pointT -= dt;
     if (this.pointT > 0) return;
     this.pointT = 0.25;
